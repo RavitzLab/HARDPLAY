@@ -288,3 +288,8 @@ The shared seek slider now uses its bound scrub value and corresponding thumb x-
 ## 0.28.2 logical queue direction
 
 The user's second screenshot identified the queue-number strip, not the seek tooltip. It now uses the existing semantic stageLeft/stageRight roles (current/next or outgoing/incoming during a fade), with an arrow and a system monospaced font. Build/self/queue/style checks pass. Native GUI verified Track transition: 02 to 03 with physical left NEXT 03 and right PAUSED 02, preserving playback position 28.048s. Installed /Applications/HARDPLAY.app codesign verification passed. No playlist/audio edit was performed.
+
+
+## 0.28.3 remaining duration under decks
+
+User clarified that no queue numbers belong in this strip. Replaced the pair with Remaining M:SS using current duration minus elapsed time, bounded to zero, and an explicit Time remaining accessibility label. Build/self/queue/style pass. The running 0.28.2 instance was playing Plate Huy at the apply step; replacement/restart was deferred and an explicit timing choice requested. No current-session transport/queue edit was made for this patch. GUI verification of the new readout remains pending installation.
