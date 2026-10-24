@@ -26,12 +26,12 @@ final class PlaylistWindowState: ObservableObject {
     private var positioning = false
     func detach(fromMini:Bool=false) {
         guard !ControlLock.shared.isLocked else { return }
-        releaseParent();self.fromMini=fromMini;edge=nil;detached=true;save();AppDelegate.shared.showPlaylistWindow()
+        releaseParent();self.fromMini=fromMini;edge=nil;detached=true;WindowPresentation.shared.autoFit=true;save();AppDelegate.shared.showPlaylistWindow()
     }
     func dock(_ side:PlaylistDockEdge,fromMini:Bool=false) {
         guard !ControlLock.shared.isLocked else { return }
         if WorkspaceState.shared.mode == .single {WorkspaceState.shared.toggle()}
-        releaseParent();self.fromMini=fromMini;edge=side;detached=true;save()
+        releaseParent();self.fromMini=fromMini;edge=side;detached=true;WindowPresentation.shared.autoFit=true;save()
         let app=AppDelegate.shared!,owner=fromMini ? app.miniWindow!:app.mainWindow!
         app.restore(owner)
         positionDock()

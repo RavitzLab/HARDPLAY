@@ -293,3 +293,8 @@ The user's second screenshot identified the queue-number strip, not the seek too
 ## 0.28.3 remaining duration under decks
 
 User clarified that no queue numbers belong in this strip. Replaced the pair with Remaining M:SS using current duration minus elapsed time, bounded to zero, and an explicit Time remaining accessibility label. Build/self/queue/style pass. The running 0.28.2 instance was playing Plate Huy at the apply step; replacement/restart was deferred and an explicit timing choice requested. No current-session transport/queue edit was made for this patch. GUI verification of the new readout remains pending installation.
+
+
+## 0.28.4 auto fit on playlist detach/dock
+
+Detach and Dock entry paths set WindowPresentation.autoFit after setting detached=true, so the ensuing measured-layout update fits the main window. Startup restoring a separate playlist also enables Auto Fit. Attach does not switch it off and existing explicit toggle remains available. Build/self/queue/style and waveform/geometry checks pass. The existing geometry checks cover content fit, bounds, width and top edge. Actual installed GUI behavior remains pending the same restart decision as 0.28.3; the user was playing audio and then focused the separate playlist. No interruption or installation over the running bundle was performed.

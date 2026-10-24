@@ -942,6 +942,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         registerHotKey()
         _ = ControlMappings.shared
         if CommandLine.arguments.contains("--mini") { toggleMini() } else { showMain() }
+        if PlaylistWindowState.shared.detached {WindowPresentation.shared.autoFit=true}
         if let edge=PlaylistWindowState.shared.edge,PlaylistWindowState.shared.detached { PlaylistWindowState.shared.dock(edge) } else if PlaylistWindowState.shared.detached { showPlaylistWindow() }
     }
     func makeMenu() {
