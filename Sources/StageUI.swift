@@ -485,13 +485,13 @@ struct PlayerView: View {
                     Button("Attach to Main Player") { playlistWindow.attach(toMini:false) }
                 } label: { MarkerIcon(systemName:"link").font(.stage(size:13)).frame(width:30,height:30) }
                     .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Attach Playlist")
-            }
+            }.fixedSize(horizontal:false,vertical:true).layoutPriority(1)
             HStack {
                 Text("\(player.tracks.count) tracks").font(.stage(size:11)).foregroundStyle(.secondary)
                 Spacer()
                 if setup.isLocked { MarkerLabel("Setup locked",systemImage:"lock.fill").font(.stage(size:10)).foregroundStyle(accent) }
             }
-            queue
+            queue.layoutPriority(-1)
             Divider()
             HStack(spacing:8) {
                 Menu { playlistActions } label: { MarkerLabel("Playlist",systemImage:"folder").font(.stage(size:11)) }.menuStyle(.borderlessButton).fixedSize()
@@ -501,10 +501,12 @@ struct PlayerView: View {
                 setupLockButton
                 Button { player.openFiles() } label: { MarkerIcon(systemName:"plus").frame(width:30,height:30) }.buttonStyle(PlayerControlStyle()).disabled(setup.editsBlocked).accessibilityLabel("Add Audio")
             }
-        }.padding(16).padding(.top,14).frame(minWidth:380,minHeight:280)
+            .fixedSize(horizontal:false,vertical:true).layoutPriority(1)
+        }.padding(16).padding(.top,8).frame(minWidth:380)
             .foregroundStyle(Color(stageHex:appearance.theme.text)).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body))
             .disabled(lock.isLocked).allowsHitTesting(!lock.isLocked)
             .overlay { if lock.isLocked { UnlockShield() } }
+            .onChange(of:hints.enabled) {_,_ in AppDelegate.shared.ensurePlaylistControlsVisible()}
             .onChange(of:lock.isLocked) { _, locked in if locked { ui.protection = false } }
     }
     private var setupLockButton: some View {
@@ -636,7 +638,7 @@ struct PlayerView: View {
                 }
             }.background(GeometryReader {proxy in Color.clear.preference(key:QueueFitHeightKey.self,value:proxy.size.height)})
         }.frame(height:windows.autoFit && !compact && !playlistOnly ? min(360,max(54,ui.queueContentHeight>0 ? ui.queueContentHeight:CGFloat(player.tracks.count)*55)):nil)
-            .frame(minHeight:windows.autoFit && !compact && !playlistOnly ? 54:(compact ? 100:160),maxHeight:windows.autoFit && !compact && !playlistOnly ? nil:.infinity)
+            .frame(minHeight:windows.autoFit && !compact && !playlistOnly ? 54:(playlistOnly ? 0:(compact ? 100:160)),maxHeight:windows.autoFit && !compact && !playlistOnly ? nil:.infinity)
             .onPreferenceChange(QueueFitHeightKey.self) {height in if abs(ui.queueContentHeight-height)>0.5 {ui.queueContentHeight=height}}
     }
 }

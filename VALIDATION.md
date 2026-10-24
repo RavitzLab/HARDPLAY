@@ -303,3 +303,10 @@ Detach and Dock entry paths set WindowPresentation.autoFit after setting detache
 ### 0.28.4 installation after restart approval
 
 The user explicitly requested restart. Replaced /Applications/HARDPLAY.app, verified codesign and version 0.28.4, then opened the installed app. Native accessibility verified Time remaining 1:28 at position 1:08 of a 2:36 track, and a subsequent live update to 1:18 remaining at 1:18 elapsed. The queue and 68.300s paused position were restored on launch. The user resumed playback afterwards; no transport was changed for QA. Attempts to exercise the separate-playlist button were rejected by computer-use with user-changed-app messages; automatic Auto Fit entry retains source and geometry coverage, without a successful physical GUI toggle in this pass.
+
+
+## 0.28.5 unclipped separate playlist controls
+
+The screenshot showed the fixed bottom toolbar clipped by the old 300px dock frame and minimum queue height, compounded by hints/titlebar space. The panel now uses native titlebar chrome outside content, a hint-aware content minimum, and a fixed-size/high-priority header/footer. Its list has zero minimum height and lower priority, so it scrolls within remaining space. Dock geometry uses the same content minimum plus native chrome, bounded to the visible display. Opening/hint changes grow undersized saved frames from the top.
+
+Build/self/queue/style checks pass. Added pure geometry checks cover minimum growth, top/width preservation and clamping to a smaller display. Installed /Applications/HARDPLAY.app version 0.28.5 and codesign verified. Native GUI/screenshot verified all four bottom controls fully visible with hints enabled and 22 tracks, plus a scrollable list above. The current track/position were preserved through the user-authorized iterative restart; the player is left paused. A physical resize through every docking direction was not exhaustively exercised.

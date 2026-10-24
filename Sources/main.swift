@@ -989,7 +989,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         miniWindow.contentView = NSHostingView(rootView: PlayerView(compact: true).padding(.top, 8).background(ThemedBackdrop()))
         miniWindow.contentMinSize=NSSize(width:380,height:540);miniWindow.contentMaxSize=NSSize(width:760,height:1000)
         miniWindow.setFrameAutosaveName("HARDPLAY.stage.minimal.mini")
-        playlistWindow = FloatingPanel(contentRect:NSRect(x:160,y:160,width:440,height:480),styleMask:[.titled,.closable,.miniaturizable,.resizable,.nonactivatingPanel,.fullSizeContentView],backing:.buffered,defer:false)
+        playlistWindow = FloatingPanel(contentRect:NSRect(x:160,y:160,width:440,height:480),styleMask:[.titled,.closable,.miniaturizable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false)
         playlistWindow.title = "Hard Play Playlist"; playlistWindow.titlebarAppearsTransparent = true
         playlistWindow.isOpaque = false; playlistWindow.backgroundColor = .clear
         playlistWindow.appearance = NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
@@ -997,7 +997,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         playlistWindow.collectionBehavior = [.canJoinAllSpaces,.fullScreenAuxiliary]
         playlistWindow.isReleasedWhenClosed = false; playlistWindow.delegate = self
         playlistWindow.isMovableByWindowBackground = true
-        playlistWindow.contentMinSize = NSSize(width:380,height:280)
+        playlistWindow.contentMinSize = NSSize(width:380,height:PlaylistPanelLayout.minimumContentHeight(hints:HintPreferences.shared.enabled))
         playlistWindow.contentView = NSHostingView(rootView:PlayerView(playlistOnly:true).background(ThemedBackdrop()))
         playlistWindow.setFrameAutosaveName("HARDPLAY.playlist.detached")
         mappingWindow = NSWindow(contentRect:NSRect(x:200,y:180,width:540,height:620),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
@@ -1192,7 +1192,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     func showMini() { defer {WindowPresentation.shared.refresh()}; restore(miniWindow); ControlMappings.shared.refreshStates() }
-    func showPlaylistWindow() { if WorkspaceState.shared.mode == .single {WorkspaceState.shared.toggle()}; restore(playlistWindow);PlaylistWindowState.shared.syncVisibility();ControlMappings.shared.refreshStates() }
+    func ensurePlaylistControlsVisible() {
+        guard let panel=playlistWindow,let screen=panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else{return}
+        let chrome=panel.frameRect(forContentRect:NSRect(x:0,y:0,width:380,height:100)).height-100
+        let contentHeight=min(PlaylistPanelLayout.minimumContentHeight(hints:HintPreferences.shared.enabled),max(200,screen.height-chrome))
+        panel.contentMinSize=NSSize(width:min(380,screen.width),height:contentHeight)
+        let minimum=panel.frameRect(forContentRect:NSRect(origin:.zero,size:panel.contentMinSize)).size
+        let fitted=PlaylistPanelLayout.fittedFrame(current:panel.frame,visible:screen,minimum:minimum)
+        if fitted != panel.frame {panel.setFrame(fitted,display:true)}
+    }
+    func showPlaylistWindow() { ensurePlaylistControlsVisible();if WorkspaceState.shared.mode == .single {WorkspaceState.shared.toggle()}; restore(playlistWindow);PlaylistWindowState.shared.syncVisibility();ControlMappings.shared.refreshStates() }
     func toggleNano() {
         guard !ControlLock.shared.isLocked else {return}
         if pocketWindow.isVisible && !pocketWindow.isMiniaturized {pocketWindow.orderOut(nil)}else {showPocket()}
@@ -1875,6 +1884,12 @@ if CommandLine.arguments.contains("--style-check") {
     let track = Track(url: URL(fileURLWithPath: "/tmp/Test Track.flac"))
     precondition(track.title == "Test Track" && track.format == "FLAC")
     precondition(timeLabel(125) == "2:05" && timeLabel(.nan) == "0:00")
+    let panelScreen=NSRect(x:0,y:0,width:1200,height:800),panelOld=NSRect(x:100,y:400,width:440,height:300)
+    let panelFit=PlaylistPanelLayout.fittedFrame(current:panelOld,visible:panelScreen,minimum:NSSize(width:380,height:450))
+    precondition(panelFit.height==450 && panelFit.maxY==panelOld.maxY && panelFit.width==440)
+    precondition(PlaylistPanelLayout.minimumContentHeight(hints:true)>PlaylistPanelLayout.minimumContentHeight(hints:false))
+    let smallPanelFit=PlaylistPanelLayout.fittedFrame(current:panelOld,visible:NSRect(x:0,y:0,width:350,height:320),minimum:NSSize(width:380,height:450))
+    precondition(smallPanelFit.width==350 && smallPanelFit.height==320 && smallPanelFit.minX==0 && smallPanelFit.minY==0)
     precondition(SeekTime.label(6)=="00:06" && SeekTime.label(60)=="01:00" && SeekTime.label(125)=="02:05" && SeekTime.label(.nan)=="00:00")
     precondition(SeekTime.seconds(x:6,width:112,duration:120)==0 && SeekTime.seconds(x:56,width:112,duration:120)==60 && SeekTime.seconds(x:106,width:112,duration:120)==120)
     let data = try JSONEncoder().encode([track])

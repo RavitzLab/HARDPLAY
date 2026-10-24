@@ -65,7 +65,8 @@ final class PlaylistWindowState: ObservableObject {
         guard let screen=owner.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else { return }
         positioning=true;defer { positioning=false }
         let gap:CGFloat=8,sideways=edge == .left || edge == .right
-        let size=NSSize(width:sideways ? 400:max(380,min(600,owner.frame.width)),height:300)
+        let minimumFrame=panel.frameRect(forContentRect:NSRect(x:0,y:0,width:380,height:PlaylistPanelLayout.minimumContentHeight(hints:HintPreferences.shared.enabled)))
+        let size=NSSize(width:min(screen.width,sideways ? 400:max(380,min(600,owner.frame.width))),height:min(screen.height,max(300,minimumFrame.height)))
         var parent=owner.frame
         let left:CGFloat=edge == .left ? size.width+gap:0,right:CGFloat=edge == .right ? size.width+gap:0
         let bottom:CGFloat=edge == .bottom ? size.height+gap:0,top:CGFloat=edge == .top ? size.height+gap:0
