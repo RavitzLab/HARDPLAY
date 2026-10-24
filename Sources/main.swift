@@ -1874,6 +1874,8 @@ if CommandLine.arguments.contains("--style-check") {
     let track = Track(url: URL(fileURLWithPath: "/tmp/Test Track.flac"))
     precondition(track.title == "Test Track" && track.format == "FLAC")
     precondition(timeLabel(125) == "2:05" && timeLabel(.nan) == "0:00")
+    precondition(SeekTime.label(6)=="00:06" && SeekTime.label(60)=="01:00" && SeekTime.label(125)=="02:05" && SeekTime.label(.nan)=="00:00")
+    precondition(SeekTime.seconds(x:6,width:112,duration:120)==0 && SeekTime.seconds(x:56,width:112,duration:120)==60 && SeekTime.seconds(x:106,width:112,duration:120)==120)
     let data = try JSONEncoder().encode([track])
     let decoded = try JSONDecoder().decode([Track].self, from: data)
     precondition(decoded == [track])
