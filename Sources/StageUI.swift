@@ -355,7 +355,7 @@ struct PlayerView: View {
                     PatchHoldEdge {withAnimation(.easeInOut(duration:0.22)) {ui.patchOpen.toggle()}}.frame(width:14).disabled(false)
                 }
                 HStack(spacing: 8) {
-                    Text("\(player.queueNumber(player.deckTrack(right:false))) · \(player.queueNumber(player.deckTrack(right:true)))").font(.stage(size: 10, design: .monospaced))
+                    Text("\(player.queueNumber(player.stageLeft)) → \(player.queueNumber(player.stageRight))").font(.system(size:11,weight:.medium,design:.monospaced)).accessibilityLabel("Track transition: \(player.queueNumber(player.stageLeft)) to \(player.queueNumber(player.stageRight))")
                     GeometryReader { g in
                         Capsule().fill(.white.opacity(0.1)).overlay(alignment: .leading) {
                             Capsule().fill(LinearGradient(colors: [accent,tapeB], startPoint: .leading, endPoint: .trailing)).frame(width: g.size.width * (player.isCrossfading ? player.fadeProgress : 0))

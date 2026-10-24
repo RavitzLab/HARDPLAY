@@ -283,3 +283,8 @@ The user's queue/audio files were retained; mode/fade test edits were restored. 
 ## 0.28.1 seek tooltip time
 
 The shared seek slider now uses its bound scrub value and corresponding thumb x-position during editing; it no longer depends on continuous-hover callbacks while native tracking owns the pointer. On release the stored hover coordinate is cleared. Zero-padded MM:SS is accompanied by MIN:SEC. Added boundary checks for 6s, 60s, 125s, NaN and spatial mapping at 0%, 50%, 100%; build/self/queue/style checks pass. Actual minute/second conversion was already correct; the screenshot alone did not establish a reversed-field calculation. The changes remove ambiguity and stale drag display. Installed app codesign/version verified. User playback was paused; a physical drag tooltip capture was not completed.
+
+
+## 0.28.2 logical queue direction
+
+The user's second screenshot identified the queue-number strip, not the seek tooltip. It now uses the existing semantic stageLeft/stageRight roles (current/next or outgoing/incoming during a fade), with an arrow and a system monospaced font. Build/self/queue/style checks pass. Native GUI verified Track transition: 02 to 03 with physical left NEXT 03 and right PAUSED 02, preserving playback position 28.048s. Installed /Applications/HARDPLAY.app codesign verification passed. No playlist/audio edit was performed.
