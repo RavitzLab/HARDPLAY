@@ -122,7 +122,7 @@ struct StageDeck: View {
     let right: Bool
     let compact: Bool
     var nextRole:Bool {player.deckUsesNextRole(right:right)}
-    var roleColor:Color {track == nil ? .gray:Color(stageHex:player.deckIsCurrent(right:right) ? "78CBA5":"E49A9A")}
+    var roleColor:Color {track == nil ? .gray:Color(stageHex:appearance.theme.isLight ? (player.deckIsCurrent(right:right) ? "1756A9":"526F96"):(player.deckIsCurrent(right:right) ? "78CBA5":"E49A9A"))}
     var actualDuration:Double {player.deckDuration(right:right)>0 ? player.deckDuration(right:right):(track.flatMap {waves.cache[Waveforms.key($0)]?.duration} ?? 0)}
     var elapsed:Double {player.deckTime(right:right)}
     var gain:Double {player.deckGain(right:right)}
@@ -131,7 +131,7 @@ struct StageDeck: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(player.queueNumber(track)).font(.custom(StageTypography.name, size: compact ? 24 : 28)).monospacedDigit()
                 Spacer()
-                HStack(spacing:5) {Circle().fill(roleColor).frame(width:5,height:5);Text(player.deckLabel(right:right))}
+                HStack(spacing:5) {Circle().fill(roleColor).frame(width:5,height:5);Text(track != nil && player.deckIsCurrent(right:right) && !player.playing && !player.isCrossfading ? "PAUSED":player.deckLabel(right:right))}
                     .font(.stage(size: 9, weight: .semibold)).tracking(1).foregroundStyle(roleColor).padding(.horizontal,7).padding(.vertical,4).background(roleColor.opacity(0.12),in:Capsule())
             }
             Text(track?.title ?? (nextRole ? "End of Queue" : "Add your music"))
@@ -151,7 +151,7 @@ struct StageDeck: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LinearGradient(colors:[Color.black.opacity(0.24),Color.white.opacity(0.035)],startPoint:.top,endPoint:.bottom),in:RoundedRectangle(cornerRadius:appearance.theme.radius))
+        .background(LinearGradient(colors:[Color.black.opacity(appearance.theme.isLight ? 0.015:0.24),Color.white.opacity(appearance.theme.isLight ? 0.9:0.035)],startPoint:.top,endPoint:.bottom),in:RoundedRectangle(cornerRadius:appearance.theme.radius))
         .overlay(RoundedRectangle(cornerRadius:appearance.theme.radius).stroke(roleColor.opacity(track == nil ? 0.15:0.55),lineWidth:1.5))
         .contextMenu {
             if let track {
@@ -320,7 +320,7 @@ struct PlayerView: View {
                 Text("\(timeLabel(player.elapsed)) / \(timeLabel(player.duration))").font(.stage(size:12)).monospacedDigit()
                 Button {workspace.player()} label:{MarkerIcon(systemName:"xmark").frame(width:30,height:30)}.buttonStyle(PlayerControlStyle()).accessibilityLabel("Return to Player")
             }.disabled(lock.isLocked)
-        }.padding(16).frame(minWidth:660,minHeight:500).foregroundStyle(Color(stageHex:appearance.theme.text)).preferredColorScheme(.dark)
+        }.padding(16).frame(minWidth:660,minHeight:500).foregroundStyle(Color(stageHex:appearance.theme.text)).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark)
             .overlay {if lock.isLocked {UnlockShield()}}
     }
     private func stageBody(wide:Bool) -> some View {
@@ -328,14 +328,18 @@ struct PlayerView: View {
             header
             QuickActionBar()
             BackupStatusStrip()
-            let layout = wide && !playlistWindow.detached ? AnyLayout(HStackLayout(alignment:.top,spacing:22)) : AnyLayout(VStackLayout(spacing:10))
+            let drawerLayout = !compact ? AnyLayout(HStackLayout(alignment:.top,spacing:14)):AnyLayout(VStackLayout(spacing:14))
+            drawerLayout {
+            if ui.modesOpen {PlaybackModesDrawer(player:player,open:$ui.modesOpen).frame(width:compact ? nil:220).frame(maxHeight:compact ? 250:nil).transition(.move(edge:.leading).combined(with:.opacity))}
+            let layout = wide && !ui.modesOpen && !playlistWindow.detached ? AnyLayout(HStackLayout(alignment:.top,spacing:22)) : AnyLayout(VStackLayout(spacing:10))
             layout {
                 playbackPanel.frame(maxWidth:.infinity,alignment:.top)
                 playlistPanel.disabled(lock.isLocked).frame(maxWidth:.infinity,maxHeight:compact || windows.autoFit ? nil:.infinity,alignment:.top)
             }
+            }
         }
         .padding(compact ? 14 : 16).frame(maxWidth:.infinity,maxHeight:compact || windows.autoFit ? nil:.infinity,alignment:.top)
-        .foregroundStyle(Color(stageHex:appearance.theme.text)).preferredColorScheme(.dark).font(.stage(.body))
+        .foregroundStyle(Color(stageHex:appearance.theme.text)).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body))
         .overlay { if lock.isLocked { UnlockShield() } }
         .onChange(of:playlistWindow.detached) { _, detached in if detached { ui.playlist = false } }
         .onChange(of:lock.isLocked) { _, locked in if locked { ui.settings = false; ui.playlist = false; ui.protection = false } }
@@ -345,6 +349,8 @@ struct PlayerView: View {
                 HStack(alignment: .top, spacing: 10) {
                     StageDeck(player: player, track: player.deckTrack(right:false), right: false, compact: compact).disabled(lock.isLocked).allowsHitTesting(!lock.isLocked)
                     StageDeck(player: player, track: player.deckTrack(right:true), right: true, compact: compact).disabled(lock.isLocked).allowsHitTesting(!lock.isLocked)
+                }.padding(.leading,14).overlay(alignment:.leading) {
+                    Button {withAnimation(.easeInOut(duration:0.22)) {ui.modesOpen.toggle()}} label:{Capsule().fill(accent.opacity(0.35)).frame(width:3,height:42).frame(width:14).frame(maxHeight:.infinity).contentShape(Rectangle())}.buttonStyle(.plain).accessibilityLabel("Left Edge Playback Modes").stageHint("Click the left edge to show or hide playback modes")
                 }.padding(.trailing,16).overlay(alignment:.trailing) {
                     PatchHoldEdge {withAnimation(.easeInOut(duration:0.22)) {ui.patchOpen.toggle()}}.frame(width:14).disabled(false)
                 }
@@ -362,13 +368,18 @@ struct PlayerView: View {
                     if editing { ui.scrub = player.elapsed; ui.scrubbing = true } else { player.seek(ui.scrub); ui.scrubbing = false }
                 }).disabled(player.current == nil || setup.playbackBlocked || lock.isLocked)
                 transport
-                if compact { restartButtons }
+                if compact || ui.modesOpen { restartButtons }
                 HStack(spacing:8) {
                     MarkerIcon(systemName:player.volume == 0 ? "speaker.slash":"speaker.wave.2").font(.stage(size:12)).foregroundStyle(accent)
                     Slider(value:$player.volume,in:0...1).controlSize(.small).tint(accent).accessibilityLabel("Master Volume")
                     Text("\(Int(player.volume * 100))%").font(.stage(size:11,design:.monospaced)).frame(width:38,alignment:.trailing)
                 }.disabled(setup.playbackBlocked || lock.isLocked).mapAction("volume")
-                QueuePolicyControls(player:player).disabled(lock.isLocked)
+                HStack(spacing:8) {
+                    Text(player.endMode == .next ? "At End: Next":"At End: Stop").font(.stage(size:11))
+                    Text("·");Text(player.startMode == .beginning ? "Start: Restart":"Start: Resume").font(.stage(size:11))
+                    Spacer(minLength:0)
+                    Button {withAnimation(.easeInOut(duration:0.22)) {ui.modesOpen.toggle()}} label:{Label("Modes",systemImage:"sidebar.left").font(.stage(size:11)).padding(7)}.buttonStyle(PlayerControlStyle(active:ui.modesOpen)).accessibilityLabel("Playback Modes").accessibilityValue(ui.modesOpen ? "Open":"Closed")
+                }.foregroundStyle(accent)
                 if let error = player.error { Text(error).font(.stage(size: 11)).foregroundStyle(.orange).fixedSize(horizontal:false, vertical:true) }
         }
     }
@@ -456,7 +467,7 @@ struct PlayerView: View {
                 Spacer()
                 Button("Full Queue") { ui.playlist = false; AppDelegate.shared.showMain() }.buttonStyle(PlayerControlStyle()).padding(3)
             }
-        }.padding(14).frame(width:340).foregroundStyle(.white).preferredColorScheme(.dark).font(.stage(.body))
+        }.padding(14).frame(width:340).foregroundStyle(Color(stageHex:appearance.theme.text)).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body))
     }
     private var detachedPlaylist: some View {
         VStack(spacing:12) {
@@ -491,7 +502,7 @@ struct PlayerView: View {
                 Button { player.openFiles() } label: { MarkerIcon(systemName:"plus").frame(width:30,height:30) }.buttonStyle(PlayerControlStyle()).disabled(setup.editsBlocked).accessibilityLabel("Add Audio")
             }
         }.padding(16).padding(.top,14).frame(minWidth:380,minHeight:280)
-            .foregroundStyle(Color(stageHex:appearance.theme.text)).preferredColorScheme(.dark).font(.stage(.body))
+            .foregroundStyle(Color(stageHex:appearance.theme.text)).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body))
             .disabled(lock.isLocked).allowsHitTesting(!lock.isLocked)
             .overlay { if lock.isLocked { UnlockShield() } }
             .onChange(of:lock.isLocked) { _, locked in if locked { ui.protection = false } }
@@ -515,7 +526,7 @@ struct PlayerView: View {
             Toggle("Settings & mappings",isOn:$setup.protectSettings).disabled(setup.isLocked)
             Text("Automatic playback and transitions continue.").font(.stage(size:10)).foregroundStyle(.secondary)
             setupLockButton
-        }.padding(16).frame(width:280).preferredColorScheme(.dark).font(.stage(.body))
+        }.padding(16).frame(width:280).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body))
             .disabled(lock.isLocked)
     }
     private func toolbarButton(_ title:String,_ icon:String,active:Bool=false,action:@escaping ()->Void)->some View {
@@ -535,6 +546,7 @@ struct PlayerView: View {
                     toolbarButton("Open Main Player","player.fullscreen") {AppDelegate.shared.showMain()}
                 }
                 Spacer(minLength:4)
+                Button {withAnimation(.easeInOut(duration:0.22)) {ui.modesOpen.toggle()}} label:{Label("Modes",systemImage:"sidebar.left").font(.stage(size:12)).padding(.horizontal,9).frame(height:32)}.buttonStyle(PlayerControlStyle(active:ui.modesOpen)).accessibilityLabel("Playback Modes")
                 toolbarButton("Toggle Control Hints","questionmark",active:hints.enabled) {withAnimation(.easeInOut(duration:0.18)) {hints.enabled.toggle()}}
                 Button {withAnimation(.easeInOut(duration:0.22)) {ui.patchOpen.toggle()}} label:{MarkerLabel("PATCH",systemImage:lock.isLocked ? "lock.fill":"slider.horizontal.3").font(.stage(size:12,weight:.bold)).padding(.horizontal,10).frame(height:32)}
                     .buttonStyle(PlayerControlStyle(active:ui.patchOpen || lock.isLocked)).accessibilityLabel("PATCH Rear Panel").accessibilityValue(ui.patchOpen ? "Open":"Closed")
@@ -572,7 +584,7 @@ struct PlayerView: View {
             Button { player.previous() } label: { MarkerIcon(systemName:"backward.end.fill").frame(width:42,height:42) }.buttonStyle(PlayerControlStyle()).accessibilityLabel("Previous Track").disabled(setup.selectionBlocked).stageHint("Previous track").mapAction("previous")
             Button { player.toggle() } label: { HardPlayTransport(playing:player.playing,compact:compact) }.buttonStyle(HardPlayPressStyle()).accessibilityLabel(player.playing ? "Pause":"Play").disabled(setup.playbackBlocked).stageHint(player.playing ? "Pause playback" : "Play · ⌥⌘ Space").mapAction("playPause")
             Button { player.next() } label: { MarkerIcon(systemName:"forward.end.fill").frame(width:42,height:42) }.buttonStyle(PlayerControlStyle()).accessibilityLabel("Next Track").disabled(setup.selectionBlocked).stageHint("Next track").mapAction("next")
-            if !compact { Spacer(minLength:0); restartButtons }
+            if !compact && !ui.modesOpen { Spacer(minLength:0); restartButtons }
         }.disabled(player.current == nil || lock.isLocked)
     }
     private var restartButtons: some View {

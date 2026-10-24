@@ -71,6 +71,6 @@ struct PatchDrawer:View {
             }
         }.padding(16).frame(width:260).frame(maxHeight:560).background(.regularMaterial,in:RoundedRectangle(cornerRadius:20))
             .overlay(RoundedRectangle(cornerRadius:20).stroke(accent.opacity(0.35),lineWidth:1)).shadow(color:.black.opacity(0.4),radius:15,x:-6,y:4)
-            .foregroundStyle(.white).preferredColorScheme(.dark).padding(8)
+            .foregroundStyle(Color(stageHex:AppearancePreferences.shared.theme.text)).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).padding(8)
     }
 }

@@ -35,11 +35,11 @@ private struct HintBar:View {
     @ObservedObject private var lock=ControlLock.shared
     var body:some View {
         HStack(spacing:10) {
-            Text("HINT").font(.stage(size:9,weight:.bold,design:.monospaced)).tracking(1).foregroundStyle(Color(red:0.65,green:0.82,blue:1))
+            Text("HINT").font(.stage(size:9,weight:.bold,design:.monospaced)).tracking(1).foregroundStyle(accent)
             Text(lock.isLocked ? "Controls locked" : (channel.text ?? "Hover over a control to see its function."))
-                .font(.stage(size:16.5,weight:.semibold)).foregroundStyle(.white.opacity(channel.text == nil ? 0.62:0.95)).lineLimit(3).frame(maxWidth:.infinity,alignment:.leading)
+                .font(.stage(size:16.5,weight:.semibold)).foregroundStyle(Color(stageHex:AppearancePreferences.shared.theme.text).opacity(channel.text == nil ? 0.7:0.95)).lineLimit(3).frame(maxWidth:.infinity,alignment:.leading)
         }.padding(.horizontal,12).frame(height:HintMetrics.height)
-            .background(Color(red:0.035,green:0.07,blue:0.13).opacity(0.65),in:RoundedRectangle(cornerRadius:9))
+            .background(Color(stageHex:AppearancePreferences.shared.theme.isLight ? "FFFFFF":"101B2B"),in:RoundedRectangle(cornerRadius:9))
             .overlay(RoundedRectangle(cornerRadius:9).stroke(.white.opacity(0.1),lineWidth:1))
             .padding(.horizontal,14).padding(.top,8).padding(.bottom,2)
             .allowsHitTesting(false).accessibilityElement(children:.combine).accessibilityLabel("Control hint").accessibilityValue(lock.isLocked ? "Controls locked" : (channel.text ?? "Hover over a control to see its function."))

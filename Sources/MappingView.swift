@@ -59,7 +59,7 @@ struct MappingView: View {
             Text("MIDI buttons: Note / CC. Master Volume: continuous CC fader. Single keys: inside HARDPLAY. Global shortcuts registered: \(mappings.globalCount). ⌥⌘ Space and standard ⌘ shortcuts stay reserved.")
                 .font(.stage(size:10)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
         }.padding(18).frame(minWidth:500,minHeight:embedded ? 300:500).fixedControlHints(enabled:!embedded)
-            .preferredColorScheme(.dark).font(.stage(.body)).foregroundStyle(.white)
+            .preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).foregroundStyle(Color(stageHex:AppearancePreferences.shared.theme.text))
             .onChange(of:setup.settingsBlocked) { _, blocked in if blocked { mappings.mapping = false } }
             .disabled(lock.isLocked).overlay { if lock.isLocked { UnlockShield() } }
     }

@@ -13,10 +13,12 @@ struct StageTheme: Codable {
     var spacing = 14.0
     var radius = 12.0
     var texture = true
-    static let names = ["Tape Blue", "Tape White", "Tape Black", "FOH", "Stage Crew", "Stagehand", "Speaker Grille", "Road Case", "Stage", "Flightcase", "Cables", "Cinema", "Theatre", "Minimal"]
+    var isLight:Bool {preset == "Blue & White"}
+    static let names = ["Blue & White","Tape Blue", "Tape White", "Tape Black", "FOH", "Stage Crew", "Stagehand", "Speaker Grille", "Road Case", "Stage", "Flightcase", "Cables", "Cinema", "Theatre", "Minimal"]
     static func named(_ name: String) -> StageTheme {
         var t = StageTheme(); t.preset = name
         switch name {
+        case "Blue & White": t.background="F5F8FD";t.text="172C4D";t.accent="1756A9";t.tape="DBE8FA";t.opacity=1;t.texture=false;t.radius=10;t.spacing=14
         case "Tape Blue": t.tape="ADC9E4";t.accent="ADC9E4";t.radius=6
         case "Tape White": t.tape="E9E5D9";t.accent="E9E5D9";t.radius=6
         case "Tape Black": t.tape="15181D";t.accent="C5D2E2";t.radius=6
@@ -38,9 +40,13 @@ struct StageTheme: Codable {
 }
 final class AppearancePreferences: ObservableObject {
     static let shared = AppearancePreferences()
-    @Published var theme: StageTheme { didSet { if let data = try? JSONEncoder().encode(theme) { UserDefaults.standard.set(data, forKey:"stageAppearance.v1") } } }
+    @Published var theme: StageTheme { didSet { for window in NSApp?.windows ?? [] {window.appearance=NSAppearance(named:theme.isLight ? .aqua:.darkAqua)};if let data = try? JSONEncoder().encode(theme) { UserDefaults.standard.set(data, forKey:"stageAppearance.v1") } } }
     init() {
         let defaults=UserDefaults.standard
+        if !defaults.bool(forKey:"blueWhiteModes.v1") {
+            if let previous=defaults.data(forKey:"stageAppearance.v1") {defaults.set(previous,forKey:"stageAppearance.beforeBlueWhite.v1")}
+            defaults.set(try? JSONEncoder().encode(StageTheme.named("Blue & White")),forKey:"stageAppearance.v1");defaults.set(true,forKey:"blueWhiteModes.v1");defaults.set(true,forKey:"markerStyle.v1")
+        }
         let prior=defaults.data(forKey:"stageAppearance.v1")
         if !defaults.bool(forKey:"markerStyle.v1") {
             if let prior {defaults.set(prior,forKey:"stageAppearance.beforeMarker.v1")}

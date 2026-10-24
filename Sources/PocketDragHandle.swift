@@ -22,7 +22,7 @@ struct PocketDragHandle: NSViewRepresentable {
     final class HandleView:NSView {
         override var mouseDownCanMoveWindow:Bool { false }
         override func draw(_ dirtyRect:NSRect) {
-            ("HARDPLAY" as NSString).draw(at:NSPoint(x:0,y:(bounds.height-10)/2),withAttributes:[.font:StageTypography.native(8),.foregroundColor:NSColor.white.withAlphaComponent(0.7),.kern:1])
+            ("HARDPLAY" as NSString).draw(at:NSPoint(x:0,y:(bounds.height-10)/2),withAttributes:[.font:StageTypography.native(8),.foregroundColor:NSColor(Color(stageHex:AppearancePreferences.shared.theme.text)).withAlphaComponent(0.7),.kern:1])
         }
         private var initialMouse:NSPoint?
         private var initialFrame:NSRect?
@@ -65,7 +65,7 @@ struct PocketResizeHandle:NSViewRepresentable {
             return window?.convertPoint(toScreen:event.locationInWindow) ?? .zero
         }
         override func draw(_ dirtyRect:NSRect) {
-            NSColor.white.withAlphaComponent(FloatingPlacement.shared.pocketLocked ? 0.15:0.55).setStroke()
+            NSColor(Color(stageHex:AppearancePreferences.shared.theme.text)).withAlphaComponent(FloatingPlacement.shared.pocketLocked ? 0.15:0.55).setStroke()
             let path=NSBezierPath();path.lineWidth=1.5
             for offset in [4.0,9,14] {path.move(to:NSPoint(x:bounds.maxX-offset,y:3));path.line(to:NSPoint(x:bounds.maxX-3,y:offset))};path.stroke()
         }

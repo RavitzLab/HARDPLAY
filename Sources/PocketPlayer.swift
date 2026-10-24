@@ -26,7 +26,7 @@ struct PocketPlayerView: View {
     }
     private var lockPanel: some View {
             VStack(alignment:.leading,spacing:9) {
-                Text("LOCKS").font(.stage(size:8,weight:.heavy)).tracking(1).foregroundStyle(.white.opacity(0.6))
+                Text("LOCKS").font(.stage(size:8,weight:.heavy)).tracking(1).foregroundStyle(Color(stageHex:appearance.theme.text).opacity(0.6))
                 Button { placement.pocketLocked.toggle() } label: {
                     lockRow("Position",state:placement.pocketLocked ? "Fixed in place":"Move freely",symbol:placement.pocketLocked ? "pin.fill":"arrow.up.and.down.and.arrow.left.and.right",locked:placement.pocketLocked)
                 }.buttonStyle(.plain).accessibilityLabel(placement.pocketLocked ? "Position fixed. Unlock Widget Position":"Position unlocked. Lock Widget Position")
@@ -35,16 +35,16 @@ struct PocketPlayerView: View {
                     if lock.isLocked { PocketUnlockControl().frame(height:30) }
                     else { Button("Lock controls") { lock.lock() }.font(.stage(size:10,weight:.semibold)).buttonStyle(.bordered).accessibilityLabel("Lock Widget Controls") }
                 }
-                Text(lock.isLocked ? "Music continues. Hold 3 sec to unlock.":"Play & skip are available.").font(.stage(size:9)).foregroundStyle(.white.opacity(0.65)).fixedSize(horizontal:false,vertical:true)
-            }.padding(10).frame(width:148).background(Color(red:0.07,green:0.11,blue:0.17).opacity(0.98),in:RoundedRectangle(cornerRadius:12))
+                Text(lock.isLocked ? "Music continues. Hold 3 sec to unlock.":"Play & skip are available.").font(.stage(size:9)).foregroundStyle(Color(stageHex:appearance.theme.text).opacity(0.65)).fixedSize(horizontal:false,vertical:true)
+            }.padding(10).frame(width:148).background(Color(stageHex:appearance.theme.isLight ? "FFFFFF":"121C2B").opacity(0.98),in:RoundedRectangle(cornerRadius:12))
     }
     private func lockRow(_ title:String,state:String,symbol:String,locked:Bool)->some View {
         HStack(spacing:7) {
             MarkerIcon(systemName:symbol).font(.stage(size:12)).frame(width:18)
-            VStack(alignment:.leading,spacing:3) { Text(title).font(.stage(size:11,weight:.semibold));Text(state).font(.stage(size:9)).foregroundStyle(.white.opacity(0.7)) }
+            VStack(alignment:.leading,spacing:3) { Text(title).font(.stage(size:11,weight:.semibold));Text(state).font(.stage(size:9)).foregroundStyle(Color(stageHex:appearance.theme.text).opacity(0.7)) }
             Spacer(minLength:0)
             Circle().fill(locked ? Color(red:1,green:0.7,blue:0.4):accent).frame(width:5,height:5)
-        }.foregroundStyle(.white).padding(6).background(.white.opacity(locked ? 0.1:0.035),in:RoundedRectangle(cornerRadius:7))
+        }.foregroundStyle(Color(stageHex:appearance.theme.text)).padding(6).background(Color(stageHex:appearance.theme.text).opacity(locked ? 0.1:0.035),in:RoundedRectangle(cornerRadius:7))
     }
     private func pocketBody(width:CGFloat,height:CGFloat)->some View {
         let scale=min(1.6,width/180)
@@ -54,7 +54,7 @@ struct PocketPlayerView: View {
                 PocketDragHandle().frame(width:116,height:18).help(placement.pocketLocked ? "Position fixed · unlock in the side panel":"Drag here to move the player anywhere")
                 Spacer()
                 Button { AppDelegate.shared.showMain();AppDelegate.shared.pocketWindow.orderOut(nil) } label: { MarkerIcon(systemName:"arrow.up.left.and.arrow.down.right").font(.stage(size:10)) }.buttonStyle(.plain).accessibilityLabel("Restore Player")
-            }.foregroundStyle(.white.opacity(0.7))
+            }.foregroundStyle(Color(stageHex:appearance.theme.text).opacity(0.7))
             VStack(alignment:.leading,spacing:6) {
                 HStack { Circle().fill(player.playing ? accent : .gray).frame(width:5,height:5);Text(lock.isLocked ? "CONTROLS LOCKED":player.playing ? "PLAYING":"PAUSED").font(.stage(size:7,weight:.bold,design:.monospaced));Spacer();Text(player.queueNumber(player.current)).font(.stage(size:8,design:.monospaced)) }
                 Text(player.current?.title ?? "Your music, ready").font(.stage(size:11*scale,weight:.semibold)).lineLimit(2).frame(maxWidth:.infinity,minHeight:28*scale,alignment:.leading)
@@ -65,10 +65,10 @@ struct PocketPlayerView: View {
                     else {let target=ui.scrub;ui.scrubbing=false;if !lock.isLocked,!setup.playbackBlocked {player.seek(target)}}
                 }.disabled(lock.isLocked || setup.playbackBlocked || player.current == nil || player.duration<=0)
                 .accessibilityLabel("Pocket Playback Position")
-            }.padding(10).foregroundStyle(accent).background(Color(red:0.035,green:0.07,blue:0.1),in:RoundedRectangle(cornerRadius:10))
+            }.padding(10).foregroundStyle(accent).background(Color(stageHex:appearance.theme.isLight ? "FFFFFF":"091219"),in:RoundedRectangle(cornerRadius:10))
             Spacer(minLength:0)
             ZStack {
-                Circle().fill(.white.opacity(0.07)).overlay(Circle().stroke(.white.opacity(0.14),lineWidth:1))
+                Circle().fill(Color(stageHex:appearance.theme.text).opacity(0.07)).overlay(Circle().stroke(Color(stageHex:appearance.theme.text).opacity(0.14),lineWidth:1))
                 VStack {
                     Button("OPEN") { AppDelegate.shared.showMain();AppDelegate.shared.pocketWindow.orderOut(nil) }.font(.stage(size:7,weight:.heavy)).buttonStyle(.plain).accessibilityLabel("Open Main Player")
                     Spacer()
@@ -82,11 +82,11 @@ struct PocketPlayerView: View {
                     Spacer()
                     Text(lock.isLocked ? "LOCKED":"READY").font(.stage(size:6,weight:.bold,design:.monospaced))
                 }.padding(12)
-            }.frame(width:wheel,height:wheel).foregroundStyle(.white).disabled(lock.isLocked)
+            }.frame(width:wheel,height:wheel).foregroundStyle(Color(stageHex:appearance.theme.text)).disabled(lock.isLocked)
             .overlay {if lock.isLocked {NativeUnlockControl().frame(width:148,height:148).background(.ultraThinMaterial,in:Circle()).accessibilityLabel("Unlock Pocket Controls")}}
             Spacer(minLength:0)
-        }.padding(14).frame(width:width,height:height).background(LinearGradient(colors:[Color(red:0.22,green:0.26,blue:0.32),Color(red:0.09,green:0.12,blue:0.17)],startPoint:.topLeading,endPoint:.bottomTrailing),in:RoundedRectangle(cornerRadius:25))
-            .overlay(RoundedRectangle(cornerRadius:25).stroke(.white.opacity(0.25),lineWidth:1))
+        }.padding(14).frame(width:width,height:height).background(LinearGradient(colors:[Color(stageHex:appearance.theme.isLight ? "F7FAFF":"384252"),Color(stageHex:appearance.theme.isLight ? "DFE9F8":"171F2B")],startPoint:.topLeading,endPoint:.bottomTrailing),in:RoundedRectangle(cornerRadius:25))
+            .overlay(RoundedRectangle(cornerRadius:25).stroke(Color(stageHex:appearance.theme.text).opacity(0.25),lineWidth:1))
             .overlay(alignment:.topLeading) {
                 if ui.drawerOpen && placement.pocketNearLeftEdge { lockPanel.offset(x:20,y:32) }
             }

@@ -174,3 +174,10 @@ Click a track title to select it without playback. Command-click toggles individ
 | Move selected tracks | ⌥⌘↑ / ⌥⌘↓ |
 
 Control-A/C/X/V/D/Z are also accepted for playlist operations; Control-Shift-Z redoes. Inside a name field, standard Command shortcuts edit text. Paste creates independent queue occurrences after the last selected track (or at the end), preserving custom titles and fades without starting playback. Finder audio-file copies can also be pasted. A grouped edit takes one Undo step. Setup and control locks protect these operations; editing commands do not act on a playlist while a separate settings/editor panel or a modal sheet has focus.
+
+
+### Blue & White / Playback Modes (native 0.28)
+
+The Blue & White preset uses white surfaces and blue controls, including the main player, Mini and Pocket. Prior themes remain available under PATCH → Themes & Appearance. The previous theme data is retained locally on migration.
+
+Click **Modes** or the left strip beside the decks to expand playback policy controls. Main uses a leading sidebar; Mini uses a compact expanding block. **At End** chooses Next/Stop, **On Play** chooses Restart/Resume. Crossfade controls edit the current occurrence's outgoing transition; **Apply to All** explicitly copies that duration throughout the queue. **Lock Setup** makes the entire Modes panel read-only, including when individual playlist-protection options are off. Its unlock button remains accessible. The question button toggles fixed top hints.

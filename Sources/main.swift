@@ -808,6 +808,7 @@ var accent: Color { Color(stageHex:AppearancePreferences.shared.theme.accent) }
 func timeLabel(_ seconds: Double) -> String { let n = Int(max(0, seconds.isFinite ? seconds : 0)); return String(format: "%d:%02d", n / 60, n % 60) }
 
 final class PlayerViewState: ObservableObject {
+    @Published var modesOpen=false
     @Published var patchOpen=false
     @Published var queueContentHeight:CGFloat=0
     @Published var search = ""
@@ -825,7 +826,7 @@ struct GlassBackdrop: NSViewRepresentable {
         view.material = .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
-        view.appearance = NSAppearance(named: .darkAqua)
+        view.appearance = NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
         return view
     }
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
@@ -859,9 +860,9 @@ struct PlayerControlStyle: ButtonStyle {
             .foregroundStyle(Color(stageHex:appearance.theme.text).opacity(enabled ? 0.94:0.52))
             .background {
                 surface.fill(Color(stageHex:appearance.theme.background))
-                    .overlay(surface.fill(lit ? accent.opacity(pressed ? 0.20:0.13):.white.opacity(pressed ? 0.075:0.035)))
+                    .overlay(surface.fill(lit ? accent.opacity(pressed ? 0.20:0.13):Color(stageHex:appearance.theme.text).opacity(pressed ? 0.075:0.035)))
             }
-            .overlay(surface.stroke(lit ? accent.opacity(0.38):.white.opacity(0.11),lineWidth:0.8))
+            .overlay(surface.stroke(lit ? accent.opacity(0.38):Color(stageHex:appearance.theme.text).opacity(0.11),lineWidth:0.8))
             .shadow(color:.black.opacity(0.10),radius:1,y:0.5)
             .contentShape(surface).opacity(enabled ? 1:0.55)
             .scaleEffect(pressed ? 0.99:1)
@@ -970,15 +971,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mainWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 680), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         mainWindow.contentMinSize = NSSize(width:600,height:620)
         mainWindow.isOpaque = false; mainWindow.backgroundColor = .clear
-        mainWindow.appearance = NSAppearance(named: .darkAqua)
+        mainWindow.appearance = NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
         mainWindow.title = "Hard Play"; mainWindow.titlebarAppearsTransparent = true
         mainWindow.titleVisibility = .hidden; mainWindow.isMovableByWindowBackground = true
         mainWindow.isReleasedWhenClosed = false; mainWindow.delegate = self
-        mainWindow.contentView = NSHostingView(rootView: PlayerView().padding(.top, 20).background(ThemedBackdrop()).preferredColorScheme(.dark).font(.stage(.body)))
+        mainWindow.contentView = NSHostingView(rootView: PlayerView().padding(.top, 20).background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
         mainWindow.center(); mainWindow.setFrameAutosaveName("HARDPLAY.stage.minimal.minimal.main")
         miniWindow = FloatingPanel(contentRect: NSRect(x: 100, y: 100, width: 380, height: 540), styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: false)
         miniWindow.isOpaque = false; miniWindow.backgroundColor = .clear
-        miniWindow.appearance = NSAppearance(named: .darkAqua)
+        miniWindow.appearance = NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
         miniWindow.title = "Hard Play Mini"; miniWindow.titleVisibility = .hidden; miniWindow.titlebarAppearsTransparent = true
         miniWindow.standardWindowButton(.closeButton)?.isHidden = true
         miniWindow.isMovableByWindowBackground = true;miniWindow.isMovable = !FloatingPlacement.shared.miniLocked; miniWindow.level = .floating
@@ -990,7 +991,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         playlistWindow = FloatingPanel(contentRect:NSRect(x:160,y:160,width:440,height:480),styleMask:[.titled,.closable,.miniaturizable,.resizable,.nonactivatingPanel,.fullSizeContentView],backing:.buffered,defer:false)
         playlistWindow.title = "Hard Play Playlist"; playlistWindow.titlebarAppearsTransparent = true
         playlistWindow.isOpaque = false; playlistWindow.backgroundColor = .clear
-        playlistWindow.appearance = NSAppearance(named:.darkAqua)
+        playlistWindow.appearance = NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
         playlistWindow.level = .floating; playlistWindow.hidesOnDeactivate = false
         playlistWindow.collectionBehavior = [.canJoinAllSpaces,.fullScreenAuxiliary]
         playlistWindow.isReleasedWhenClosed = false; playlistWindow.delegate = self
@@ -1002,7 +1003,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mappingWindow.level = .floating
         mappingWindow.title = "Hard Play Keyboard / MIDI"; mappingWindow.isReleasedWhenClosed = false; mappingWindow.delegate = self
         mappingWindow.contentMinSize = NSSize(width:500,height:500)
-        mappingWindow.appearance = NSAppearance(named:.darkAqua)
+        mappingWindow.appearance = NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
         mappingWindow.contentView = NSHostingView(rootView:MappingView().background(ThemedBackdrop()))
         mappingWindow.setFrameAutosaveName("HARDPLAY.mappings")
         pocketWindow = PocketPanel(contentRect:NSRect(x:100,y:100,width:344,height:320),styleMask:[.borderless,.nonactivatingPanel,.resizable],backing:.buffered,defer:false)
@@ -1017,9 +1018,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let restored=pocketWindow.frame;let limited=PocketPanel.limitedSize(restored.size)
         pocketWindow.setContentSize(limited)
         settingsWindow = utilityWindow(title:"Hard Play PATCH",width:370,height:500)
-        settingsWindow.contentView = NSHostingView(rootView:PlayerView(settingsOnly:true).padding(20).background(ThemedBackdrop()).preferredColorScheme(.dark).font(.stage(.body)))
+        settingsWindow.contentView = NSHostingView(rootView:PlayerView(settingsOnly:true).padding(20).background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
         themesWindow = utilityWindow(title:"Hard Play Themes",width:410,height:760)
-        themesWindow.contentView = NSHostingView(rootView:ThemeEditorView().background(ThemedBackdrop()).preferredColorScheme(.dark).font(.stage(.body)))
+        themesWindow.contentView = NSHostingView(rootView:ThemeEditorView().background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
     }
     func showQuickEdit(_ track:Track) {
         guard !SetupLock.shared.editsBlocked,!ControlLock.shared.isLocked else {return}
@@ -1031,7 +1032,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let window=quickEditWindow ?? utilityWindow(title:"Hard Play Quick Edit",width:760,height:780)
         window.contentMinSize=NSSize(width:620,height:650)
         if quickEditWindowModel !== model {
-            window.contentView=NSHostingView(rootView:QuickEditView(edit:model).background(ThemedBackdrop()).preferredColorScheme(.dark).font(.stage(.body)))
+            window.contentView=NSHostingView(rootView:QuickEditView(edit:model).background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
             quickEditWindowModel=model
         }
         quickEditWindow=window;restore(window);NSApp.activate(ignoringOtherApps:true)
@@ -1041,7 +1042,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !SetupLock.shared.settingsBlocked,!ControlLock.shared.isLocked else {return}
         if viewerWindow == nil {
             viewerWindow=utilityWindow(title:"Hard Play Web Viewer",width:420,height:720)
-            viewerWindow.contentView=NSHostingView(rootView:WebViewerView().background(ThemedBackdrop()).preferredColorScheme(.dark).font(.stage(.body)))
+            viewerWindow.contentView=NSHostingView(rootView:WebViewerView().background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
             viewerWindow.contentMinSize=NSSize(width:380,height:500);viewerWindow.center()
         }
         restore(viewerWindow);NSApp.activate(ignoringOtherApps:true)
@@ -1051,7 +1052,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !SetupLock.shared.settingsBlocked,!ControlLock.shared.isLocked else {return}
         if backupWindow == nil {
             backupWindow=utilityWindow(title:"Hard Play Timecode & Backup",width:500,height:690)
-            backupWindow.contentView=NSHostingView(rootView:BackupView().background(ThemedBackdrop()).preferredColorScheme(.dark).font(.stage(.body)))
+            backupWindow.contentView=NSHostingView(rootView:BackupView().background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
             backupWindow.contentMinSize=NSSize(width:440,height:540)
             backupWindow.center()
         }
@@ -1115,7 +1116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func utilityWindow(title:String,width:CGFloat,height:CGFloat)->NSWindow {
         let window=NSWindow(contentRect:NSRect(x:200,y:100,width:width,height:height),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title=title;window.isReleasedWhenClosed=false;window.delegate=self
-        window.contentMinSize=NSSize(width:350,height:450);window.appearance=NSAppearance(named:.darkAqua)
+        window.contentMinSize=NSSize(width:350,height:450);window.appearance=NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
         window.isOpaque=false;window.backgroundColor = .clear;window.level = .floating
         window.setFrameAutosaveName(title)
         return window
