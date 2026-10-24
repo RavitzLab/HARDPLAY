@@ -298,3 +298,8 @@ User clarified that no queue numbers belong in this strip. Replaced the pair wit
 ## 0.28.4 auto fit on playlist detach/dock
 
 Detach and Dock entry paths set WindowPresentation.autoFit after setting detached=true, so the ensuing measured-layout update fits the main window. Startup restoring a separate playlist also enables Auto Fit. Attach does not switch it off and existing explicit toggle remains available. Build/self/queue/style and waveform/geometry checks pass. The existing geometry checks cover content fit, bounds, width and top edge. Actual installed GUI behavior remains pending the same restart decision as 0.28.3; the user was playing audio and then focused the separate playlist. No interruption or installation over the running bundle was performed.
+
+
+### 0.28.4 installation after restart approval
+
+The user explicitly requested restart. Replaced /Applications/HARDPLAY.app, verified codesign and version 0.28.4, then opened the installed app. Native accessibility verified Time remaining 1:28 at position 1:08 of a 2:36 track, and a subsequent live update to 1:18 remaining at 1:18 elapsed. The queue and 68.300s paused position were restored on launch. The user resumed playback afterwards; no transport was changed for QA. Attempts to exercise the separate-playlist button were rejected by computer-use with user-changed-app messages; automatic Auto Fit entry retains source and geometry coverage, without a successful physical GUI toggle in this pass.
