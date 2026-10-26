@@ -1,4 +1,4 @@
-# Validation — Hard Play 0.35.5
+# Validation — Hard Play 0.36.0
 
 - macOS arm64 release build, model self-test, queue and style checks passed.
 - Clip tests cover exact sample trim/join, original-file preservation, export cancellation, Undo/Redo, stereo edge-silence detection, internal silence retention, silent/no-edge cases, and custom fade persistence.
@@ -11,3 +11,14 @@
 - Nine curated themes and custom save/reload/update/copy/delete passed isolated preference checks.
 - Back to Player and utility close navigation were checked in the installed app, including returning to Mini. Return button placement was visually checked in PATCH and Themes.
 - This is validation of current local source, not a claim that every source version has a published installer or successful hosted CI run.
+
+- Media import tests generate H.264 video with audio and check Auto extraction, AAC conversion, WAV duration, unchanged source bytes, rejection of corrupt/audio-less media and cleanup on cancellation. Optional FFmpeg fallback is implemented but was not exercised on this Mac because FFmpeg is not installed.
+
+## Set sync — 26 October 2026
+
+- Release build and required self/queue/style checks passed. Playlist round-trip and media import regression checks passed.
+- `--set-sync-test` passed using two isolated Player instances and a real TLS-PSK localhost connection. Push and pull match files despite different paths/order, reconstruct duplicate cues, transfer titles/fades/start points/options, remain paused and support Undo/Redo.
+- Missing audio, destination locking, edits after review, a playing peer and disconnect prevent pending replacement. Original audio bytes remain unchanged. Legacy hello packets decode without enabling set-sync writes.
+- Existing `--backup-test` and `--backup-link-test` passed: packages, hashes, malformed/bounded frames, wrong pairing codes, role conflicts, file invalidation and heartbeat timeout.
+- This is metadata synchronization. Physical two-Mac networking, synchronized playback clocks, LTC/MTC and hardware failover have not been validated or enabled by this change.
+- Installed 0.36.0 UI: A/B indicator is directly left of PATCH and opens Timecode & Backup; Verify/Export is collapsed initially. Track right-click → Show in Finder opened Finder with the exact source WAV selected. The existing user queue and paused position survived the update.
