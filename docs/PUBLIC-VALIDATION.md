@@ -1,4 +1,4 @@
-# Validation — Hard Play 0.36.0
+# Validation — Hard Play 0.36.1
 
 - macOS arm64 release build, model self-test, queue and style checks passed.
 - Clip tests cover exact sample trim/join, original-file preservation, export cancellation, Undo/Redo, stereo edge-silence detection, internal silence retention, silent/no-edge cases, and custom fade persistence.
@@ -22,3 +22,11 @@
 - Existing `--backup-test` and `--backup-link-test` passed: packages, hashes, malformed/bounded frames, wrong pairing codes, role conflicts, file invalidation and heartbeat timeout.
 - This is metadata synchronization. Physical two-Mac networking, synchronized playback clocks, LTC/MTC and hardware failover have not been validated or enabled by this change.
 - Installed 0.36.0 UI: A/B indicator is directly left of PATCH and opens Timecode & Backup; Verify/Export is collapsed initially. Track right-click → Show in Finder opened Finder with the exact source WAV selected. The existing user queue and paused position survived the update.
+
+## Linked Playback — 27 October 2026
+
+- `--linked-playback-test` uses two real, muted AVPlayers and a TLS localhost pair. Play/Pause from either Mac, seek, Next/Previous, primary-driven automatic Shuffle, explicit arming on both Macs, lock rejection and disconnect continuation passed.
+- Set sync remains independent by default; one-sided arming never starts audio. A configuration edit before the throttled observer runs prevents arming immediately.
+- Required build/model/queue/style checks and set-sync regression passed. This is LAN transport/state following, not a sample-accurate audio clock or measured physical two-Mac synchronization guarantee.
+
+- Installed 0.36.1 verified by codesign and Info.plist; Timecode & Backup shows the separate Linked Playback switch, current status and both-Mac version requirement. The existing paused queue and position were preserved.
