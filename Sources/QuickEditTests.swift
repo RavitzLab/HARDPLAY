@@ -15,6 +15,26 @@ import AVFoundation
         for i in 0..<48000 {buffer.floatChannelData![0][i]=Float(i)/96000;buffer.floatChannelData![1][i] = -Float(i)/96000}
         try out.write(from:buffer)
     }
+    let silentEdges=folder.appendingPathComponent("silence-edges.wav")
+    do {
+        let out=try AVAudioFile(forWriting:silentEdges,settings:format.settings)
+        let b=AVAudioPCMBuffer(pcmFormat:format,frameCapacity:48000)!;b.frameLength=48000
+        for i in 0..<48000 {b.floatChannelData![0][i]=0;b.floatChannelData![1][i]=(i>=9600 && i<38400 && !(i>=18000 && i<24000)) ? 0.25:0}
+        try out.write(from:b)
+    }
+    let edges=try EdgeSilence.detect(silentEdges)
+    precondition(edges.removable && abs(edges.leading-0.18)<0.00001 && abs(edges.trailing-0.18)<0.00001)
+    let edgeCopy=folder.appendingPathComponent("trimmed-edges.wav");try ClipExport.write(source:silentEdges,range:edges.keep!,to:edgeCopy)
+    let edgeFile=try AVAudioFile(forReading:edgeCopy);precondition(edgeFile.length == 30720)
+    let silent=folder.appendingPathComponent("silent.wav")
+    do {let out=try AVAudioFile(forWriting:silent,settings:format.settings);let b=AVAudioPCMBuffer(pcmFormat:format,frameCapacity:4800)!;b.frameLength=4800;for i in 0..<4800 {b.floatChannelData![0][i]=0;b.floatChannelData![1][i]=0};try out.write(from:b)}
+    let empty=try EdgeSilence.detect(silent);precondition(empty.keep == nil && !empty.removable)
+    let noEdges=try EdgeSilence.detect(source);precondition(!noEdges.removable)
+    let customFade=FadeMode.duration(4.7),encodedFade=try JSONEncoder().encode(customFade)
+    precondition(customFade.seconds == 4.7 && FadeMode.duration(0) == .none && FadeMode.standard.seconds == 2)
+    let decodedFade=try JSONDecoder().decode(FadeMode.self,from:encodedFade);precondition(decodedFade == customFade)
+    let oldFade=try JSONDecoder().decode(FadeMode.self,from:Data("\"short\"".utf8));precondition(oldFade == .short)
+    precondition(FadeMode(rawValue:"seconds:nan") == nil && FadeMode(rawValue:"seconds:31") == nil)
     var pieces=EditorClipSelection(clips:[EditorClip(range:.init(start:0,end:1))])
     pieces.select(.init(start:0.125,end:0.25),add:false);pieces.select(.init(start:0.5,end:0.625),add:true)
     precondition(pieces.ranges == [.init(start:0.125,end:0.25),.init(start:0.5,end:0.625)])
@@ -80,6 +100,9 @@ import AVFoundation
     title.duration=1.0/48000;title.end=title.duration;title.updateText();precondition(title.commitText() && title.end == title.duration)
     title.duration=1;title.end=1;title.updateText()
     title.inText="0:00.200";title.outText="0:00.800";precondition(title.commitText() && title.range == ClipRange(start:0.2,end:0.8))
+    player.setFadeModeForAll(customFade);try player.writePlaylist(to:set);try restored.readPlaylist(from:set)
+    precondition(restored.tracks.allSatisfy {restored.fadeMode(after:$0) == customFade})
+    print("PASS: edge-silence streaming scan, stereo sound, internal silence preserved, all-silent/no-edge cases, trimmed WAV, custom crossfade/legacy decoding and playlist roundtrip")
     print("PASS: exact stereo sample trim, sample rate, WAV length, original hash unchanged, overwrite protection, invalid ranges, cancellation cleanup, copy/replace identities, fade, Undo/Redo, playlist persistence, setup lock precise time fields, noncontiguous join samples, clip selection/splitting, zoom/pan bounds, detailed waveform and Option audition safety")
 }
 private func tryHash(_ url:URL)->String {(try? BackupManifest.hashFile(url).0) ?? ""}

@@ -1,5 +1,10 @@
 import SwiftUI
 
+final class PlaybackDrawerState:ObservableObject {
+    static let shared=PlaybackDrawerState()
+    @Published var open=false
+}
+
 /// Editing these policies never triggers a clip. The explicit transport owns playback.
 struct PlaybackModesDrawer:View {
     @ObservedObject var player:Player
@@ -11,7 +16,7 @@ struct PlaybackModesDrawer:View {
     private var transitionTrack:Track? {player.current ?? player.selectedTrack ?? player.tracks.first}
     var body:some View {
         VStack(alignment:.leading,spacing:16) {
-            HStack {Text("MODES").font(.stage(size:16,weight:.bold));Spacer();Button {withAnimation(.easeInOut(duration:0.22)) {open=false}} label:{Image(systemName:"xmark").frame(width:28,height:28)}.buttonStyle(PlayerControlStyle()).accessibilityLabel("Close Modes")}
+            HStack {Text("PLAYBACK").font(.stage(size:16,weight:.bold));Spacer();Button {withAnimation(.easeInOut(duration:0.22)) {open=false}} label:{Image(systemName:"xmark").frame(width:28,height:28)}.buttonStyle(PlayerControlStyle()).accessibilityLabel("Close Playback")}
             ScrollView {
                 VStack(alignment:.leading,spacing:17) {
                     group("At End") {
@@ -21,20 +26,31 @@ struct PlaybackModesDrawer:View {
                     if player.endMode == .stop {
                         Picker("Stop Before End",selection:$player.stopBeforeEnd) {ForEach([0.0,1,2,3,5,10,15,30],id:\.self) {Text("\(Int($0)) s").tag($0)}}.disabled(blocked)
                     }
-                    group("On Play") {
-                        choice("Restart",icon:"backward.end.fill",active:player.startMode == .beginning,hint:"On Play · start the track from 0:00") {player.startMode = .beginning}
-                        choice("Resume",icon:"play.fill",active:player.startMode == .resume,hint:"On Play · continue from the saved position") {player.startMode = .resume}
+                    group("Repeat") {
+                        ForEach(RepeatMode.allCases,id:\.self) {mode in
+                            choice(mode == .off ? "Off":mode == .one ? "One":"Playlist",icon:mode == .one ? "repeat.1":"repeat",active:player.repeatMode == mode,hint:mode == .off ? "Repeat off":mode == .one ? "Repeat this track":"Repeat the whole playlist") {
+                                if mode == .one {player.shuffle=false}
+                                player.setRepeat(mode)
+                            }
+                        }
+                    }
+                    group("Order") {
+                        choice("In order",icon:"list.number",active:!player.shuffle,hint:"Follow the playlist order") {player.shuffle=false}
+                        choice("Shuffle",icon:"shuffle",active:player.shuffle,hint:"Keep choosing a random different track, including after the last playlist entry") {
+                            if player.repeatOne {player.setRepeat(.off)}
+                            player.endMode = .next;player.shuffle=true
+                        }
                     }
                     VStack(alignment:.leading,spacing:8) {
                         Text("Crossfade · \(player.queueNumber(transitionTrack)) → next").font(.stage(size:11)).foregroundStyle(.secondary)
                         HStack(spacing:6) {ForEach(FadeMode.allCases,id:\.self) {mode in
-                            choice(mode == .none ? "Off":"\(Int(mode.seconds)) s",icon:mode == .none ? "arrow.right.to.line":"circle.lefthalf.filled",active:transitionTrack.map {player.fadeMode(after:$0)==mode} ?? false,hint:mode == .none ? "This transition · no overlap":"This transition · overlap for \(Int(mode.seconds)) seconds") {if let track=transitionTrack {player.setFadeMode(mode,after:track)}}
+                            choice(mode == .none ? "Off":"\(String(format:"%g",mode.seconds)) s",icon:mode == .none ? "arrow.right.to.line":"circle.lefthalf.filled",active:transitionTrack.map {player.fadeMode(after:$0)==mode} ?? false,hint:mode == .none ? "This transition · no overlap":"This transition · overlap for \(String(format:"%g",mode.seconds)) seconds") {if let track=transitionTrack {player.setFadeMode(mode,after:track)}}
                         }}.disabled(transitionTrack == nil)
                         Button {if let track=transitionTrack {player.setFadeModeForAll(player.fadeMode(after:track))}} label:{Label("Apply to All",systemImage:"square.stack").font(.stage(size:11)).frame(maxWidth:.infinity).padding(9)}.buttonStyle(PlayerControlStyle()).disabled(blocked || transitionTrack == nil).stageHint("Apply this fade duration to every transition in the playlist · Undo is available")
                     }
 
                 }
-            }.frame(maxHeight:300)
+            }.frame(maxHeight:460)
             Divider()
             Text(blocked ? "Setup protected":"Setup editable").font(.stage(size:11)).foregroundStyle(accent)
             Button {if setup.isLocked {setup.unlock()}else {setup.lock()}} label:{Label(setup.isLocked ? "Unlock Setup":"Lock Setup",systemImage:setup.isLocked ? "lock.fill":"lock.open").font(.stage(size:12)).frame(maxWidth:.infinity).padding(10)}.buttonStyle(PlayerControlStyle(active:setup.isLocked)).disabled(lock.isLocked).accessibilityLabel(setup.isLocked ? "Unlock Modes Setup":"Lock Modes Setup")

@@ -15,6 +15,8 @@ final class PlaylistWindowState: ObservableObject {
     static func shouldHideSeparate(detached:Bool,docked:Bool,visible:Bool,minimized:Bool)->Bool {detached && !docked && visible && !minimized}
     func syncVisibility() {
         let panel=AppDelegate.shared?.playlistWindow
+        let allVisible=detached && panel?.isVisible == true && panel?.isMiniaturized == false
+        if windowVisible != allVisible {windowVisible=allVisible}
         let visible=detached && edge == nil && panel?.isVisible == true && panel?.isMiniaturized == false
         if separateVisible != visible {separateVisible=visible}
     }
@@ -22,6 +24,24 @@ final class PlaylistWindowState: ObservableObject {
         guard !ControlLock.shared.isLocked,let app=AppDelegate.shared,let panel=app.playlistWindow else {return}
         if Self.shouldHideSeparate(detached:detached,docked:edge != nil,visible:panel.isVisible,minimized:panel.isMiniaturized) {panel.orderOut(nil);syncVisibility();ControlMappings.shared.refreshStates()}
         else {detach()}
+    }
+    @Published var shown=true
+    @Published private(set) var windowVisible=false
+    func startInline() {
+        releaseParent();edge=nil;detached=false;shown=true;save()
+        AppDelegate.shared?.playlistWindow?.orderOut(nil);syncVisibility()
+    }
+    func isShown(fromMini:Bool)->Bool {detached ? windowVisible:shown}
+    func toggleList(fromMini:Bool) {
+        guard !ControlLock.shared.isLocked else {return}
+        if !detached {
+            shown.toggle();WindowPresentation.shared.autoFit=true;WindowPresentation.shared.requestFit();if fromMini {AppDelegate.shared.fitMiniPlaylist()}
+        }else if let panel=AppDelegate.shared?.playlistWindow {
+            if panel.isVisible && !panel.isMiniaturized {panel.orderOut(nil)}
+            else if let edge {dock(edge,fromMini:fromMini)}
+            else {AppDelegate.shared.showPlaylistWindow()}
+            syncVisibility()
+        }
     }
     private var positioning = false
     func detach(fromMini:Bool=false) {
@@ -47,10 +67,11 @@ final class PlaylistWindowState: ObservableObject {
         if edge != nil,app.playlistWindow.isVisible,self.fromMini == fromMini { app.playlistWindow.orderOut(nil);ControlMappings.shared.refreshStates() }
         else { dock(edge ?? .bottom,fromMini:fromMini) }
     }
-    func attach(toMini:Bool) {
+    func attach(toMini:Bool,activatePlayer:Bool=true) {
         guard !ControlLock.shared.isLocked else { return }
-        releaseParent();edge=nil;detached=false;save();AppDelegate.shared.playlistWindow.orderOut(nil);syncVisibility()
-        if toMini { AppDelegate.shared.showMini() } else { AppDelegate.shared.showMain() }
+        releaseParent();edge=nil;detached=false;shown=true;save();AppDelegate.shared.playlistWindow.orderOut(nil);syncVisibility()
+        if toMini {AppDelegate.shared.fitMiniPlaylist()}
+        if activatePlayer {if toMini { AppDelegate.shared.showMini() } else { AppDelegate.shared.showMain() }}
     }
     private func save() {
         UserDefaults.standard.set(detached,forKey:"playlistDetached")

@@ -130,3 +130,38 @@ struct EditorClipSelection {
         return clip.range
     }
 }
+
+/// Streams decoded samples; silence inside the music is never removed.
+enum EdgeSilence {
+    struct Result {
+        let keep:ClipRange?
+        let duration:Double
+        var leading:Double {keep?.start ?? duration}
+        var trailing:Double {keep.map {max(0,duration-$0.end)} ?? 0}
+        var removable:Bool {keep != nil && leading+trailing>0}
+    }
+    static func detect(_ url:URL,thresholdDB:Double = -60)throws->Result {
+        guard thresholdDB.isFinite,(-90 ... -20).contains(thresholdDB) else {throw BackupFailure("Choose a silence threshold between −90 and −20 dB.")}
+        let scoped=url.startAccessingSecurityScopedResource();defer {if scoped {url.stopAccessingSecurityScopedResource()}}
+        let file=try AVAudioFile(forReading:url),rate=file.processingFormat.sampleRate
+        guard rate>0,file.length>0,let buffer=AVAudioPCMBuffer(pcmFormat:file.processingFormat,frameCapacity:32768) else {throw BackupFailure("No readable audio samples.")}
+        let threshold=Float(pow(10,thresholdDB/20));var first:Int64?,last:Int64=0,offset:Int64=0
+        while offset<file.length {
+            try Task.checkCancellation();try file.read(into:buffer,frameCount:AVAudioFrameCount(min(32768,file.length-offset)))
+            guard buffer.frameLength>0,let channels=buffer.floatChannelData else {throw BackupFailure("Cannot analyse decoded audio samples.")}
+            for frame in 0..<Int(buffer.frameLength) {
+                var audible=false
+                for channel in 0..<Int(buffer.format.channelCount) {let value=channels[channel][frame*Int(buffer.stride)];if !value.isFinite {throw BackupFailure("Audio contains invalid samples.")};if abs(value)>threshold {audible=true;break}}
+                if audible {if first == nil {first=offset+Int64(frame)};last=offset+Int64(frame)}
+            }
+            offset += Int64(buffer.frameLength)
+        }
+        let duration=Double(file.length)/rate
+        guard let first else {return Result(keep:nil,duration:duration)}
+        // Keep a 20ms guard around sound and ignore edges shorter than 100ms.
+        let inPoint=Double(first)/rate,outPoint=Double(last+1)/rate
+        let start=inPoint>=0.1 ? max(0,inPoint-0.02):0
+        let end=duration-outPoint>=0.1 ? min(duration,outPoint+0.02):duration
+        return Result(keep:ClipRange(start:start,end:end),duration:duration)
+    }
+}

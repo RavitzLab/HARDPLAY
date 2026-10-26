@@ -20,6 +20,7 @@ private func expectFailure(_ operation:()async throws->Void) async throws {
     func input(_ urls:[URL],fade:FadeMode = .short)->BackupSetInput {.init(name:"Show",items:urls.enumerated().map {.init(url:$0.element,title:"Cue \($0.offset)",occurrenceID:nil,fade:fade,position:0.25)},options:options)}
     let set=input([a,a]);let manifest=try await BackupManifest.build(set)
     let moved=try await BackupManifest.build(input([b,b]));precondition(manifest.valid && manifest.differences(from:moved).isEmpty)
+    let variableFade=try await BackupManifest.build(input([b,b],fade:.duration(4.7)));precondition(variableFade.valid && variableFade.entries.allSatisfy {$0.fade == FadeMode.duration(4.7).rawValue})
     let fades=try await BackupManifest.build(input([b,b],fade:.long));precondition(manifest.differences(from:fades).count == 2)
     var bytes=silentWave();bytes[bytes.count-2]=1;try bytes.write(to:b)
     let changed=try await BackupManifest.build(input([b,b]));precondition(manifest.differences(from:changed).contains {$0.contains("different audio")})

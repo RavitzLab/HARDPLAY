@@ -8,17 +8,24 @@ struct StageTheme: Codable {
     var text = "F2F3F6"
     var tape = "ADC9E4"
     var opacity = 0.88
+    var mainWindowOpacity:Double?
+    var miniWindowOpacity:Double?
     var buttonSize = 60.0
     var textScale = 1.0
     var spacing = 14.0
     var radius = 12.0
     var texture = true
-    var isLight:Bool {preset == "Blue & White"}
-    static let names = ["Blue & White","Tape Blue", "Tape White", "Tape Black", "FOH", "Stage Crew", "Stagehand", "Speaker Grille", "Road Case", "Stage", "Flightcase", "Cables", "Cinema", "Theatre", "Minimal"]
+    var isLight:Bool {preset == "Blue & White" || preset == "Signal White"}
+    var usesMono:Bool {preset == "Mono Console" || preset == "Signal White"}
+    var flatBackdrop:Bool {["Mono Console","Crew Tape","Signal White"].contains(preset)}
+    static let names = ["Blue & White","Tape Blue", "Tape White", "Tape Black", "FOH", "Stage Crew", "Stagehand", "Speaker Grille", "Road Case", "Stage", "Flightcase", "Cables", "Cinema", "Theatre", "Minimal", "Mono Console", "Crew Tape", "Signal White"]
     static func named(_ name: String) -> StageTheme {
         var t = StageTheme(); t.preset = name
         switch name {
         case "Blue & White": t.background="F5F8FD";t.text="172C4D";t.accent="1756A9";t.tape="DBE8FA";t.opacity=1;t.texture=false;t.radius=10;t.spacing=14
+        case "Mono Console": t.background="111820";t.text="E5EDF2";t.accent="8EC9DB";t.tape="DAE7E9";t.opacity=1;t.radius=4;t.spacing=14;t.texture=true
+        case "Crew Tape": t.background="20211F";t.text="F1EEE5";t.accent="DEC283";t.tape="E6D4A4";t.opacity=1;t.radius=5;t.spacing=14;t.texture=true
+        case "Signal White": t.background="F2F1EC";t.text="202B33";t.accent="245F73";t.tape="E7D59F";t.opacity=1;t.radius=6;t.spacing=14;t.texture=true
         case "Tape Blue": t.tape="ADC9E4";t.accent="ADC9E4";t.radius=6
         case "Tape White": t.tape="E9E5D9";t.accent="E9E5D9";t.radius=6
         case "Tape Black": t.tape="15181D";t.accent="C5D2E2";t.radius=6
@@ -68,15 +75,33 @@ extension Color {
     }
 }
 struct ThemedBackdrop: View {
+    var playerWindow:String?=nil
     @ObservedObject var appearance = AppearancePreferences.shared
     var body: some View {
         let t = appearance.theme
-        GlassBackdrop().overlay(Color(stageHex:t.background).opacity(t.opacity))
+        let windowOpacity = playerWindow == "main" ? (t.mainWindowOpacity ?? 1) : playerWindow == "mini" ? (t.miniWindowOpacity ?? 1) : 1
+        Group {if windowOpacity < 1 {Color(stageHex:t.background).opacity(windowOpacity)}else if t.flatBackdrop {Color(stageHex:t.background)}else {GlassBackdrop().overlay(Color(stageHex:t.background).opacity(t.opacity))}}
             .overlay {
                 if t.texture {
                     Canvas { ctx,size in
                         let color = Color(stageHex:t.accent).opacity(0.025)
                         switch t.preset {
+                        case "Mono Console", "Signal White":
+                            // A fixed number of registration marks; no images or continuous animation.
+                            let ink=Color(stageHex:t.text).opacity(0.12)
+                            let inset=10.0,arm=14.0
+                            for point in [CGPoint(x:inset,y:inset),CGPoint(x:size.width-inset,y:inset),CGPoint(x:inset,y:size.height-inset),CGPoint(x:size.width-inset,y:size.height-inset)] {
+                                let dx=point.x<size.width/2 ? arm:-arm,dy=point.y<size.height/2 ? arm:-arm
+                                var mark=Path();mark.move(to:CGPoint(x:point.x+dx,y:point.y));mark.addLine(to:point);mark.addLine(to:CGPoint(x:point.x,y:point.y+dy));ctx.stroke(mark,with:.color(ink),lineWidth:1)
+                            }
+                            for i in 0..<12 {ctx.fill(Path(CGRect(x:20+Double(i)*6,y:size.height-8,width:1,height:i%3==0 ? 5:2)),with:.color(ink))}
+                        case "Crew Tape":
+                            let ink=Color(stageHex:t.tape)
+                            for x in [8.0,size.width-34] {
+                                var tape=Path();tape.addLines([CGPoint(x:x,y:8),CGPoint(x:x+28,y:10),CGPoint(x:x+25,y:15),CGPoint(x:x-1,y:13)]);tape.closeSubpath();ctx.fill(tape,with:.color(ink.opacity(0.45)))
+                            }
+                            var seam=Path();seam.addRect(CGRect(x:6,y:6,width:max(0,size.width-12),height:max(0,size.height-12)))
+                            ctx.stroke(seam,with:.color(ink.opacity(0.10)),style:StrokeStyle(lineWidth:0.8,dash:[3,7]))
                         case "FOH", "Stage Crew", "Stagehand":
                             // Sparse tolex lines and case hardware; static paths, no texture images.
                             var grain=Path()
@@ -139,7 +164,7 @@ struct ThemeEditorView: View {
         ScrollView {
             VStack(alignment:.leading,spacing:16) {
                 Text("Themes & Appearance").font(.stage(.title2).bold())
-                Text("Touring cases · FOH markings · crew tape · clear marker lettering. Live preview stays in the player.").font(.stage(.callout)).foregroundStyle(.secondary)
+                Text("Lightweight native themes · mono console · crew tape · stage markings. Live preview stays in the player.").font(.stage(.callout)).foregroundStyle(.secondary)
                 LazyVGrid(columns:[GridItem(.flexible()),GridItem(.flexible())],spacing:8) {
                     ForEach(StageTheme.names,id:\.self) { name in
                         Button { appearance.theme = .named(name) } label: {
@@ -152,6 +177,8 @@ struct ThemeEditorView: View {
                 ColorPicker("Background",selection:appearance.color(\.background),supportsOpacity:false)
                 ColorPicker("Text",selection:appearance.color(\.text),supportsOpacity:false)
                 ColorPicker("Playlist tape",selection:appearance.color(\.tape),supportsOpacity:false)
+                adjustment("Main window opacity",value:Binding(get:{appearance.theme.mainWindowOpacity ?? 1},set:{appearance.theme.mainWindowOpacity=($0 * 100).rounded()/100}),range:0.3...1,suffix:"%",factor:100)
+                adjustment("Mini window opacity",value:Binding(get:{appearance.theme.miniWindowOpacity ?? 1},set:{appearance.theme.miniWindowOpacity=($0 * 100).rounded()/100}),range:0.3...1,suffix:"%",factor:100)
                 adjustment("Background opacity",value:$appearance.theme.opacity,range:0.25...1,suffix:"%",factor:100)
                 adjustment("Play button",value:$appearance.theme.buttonSize,range:48...90,suffix:" px")
                 adjustment("Track text",value:$appearance.theme.textScale,range:0.9...1.5,suffix:"%",factor:100)

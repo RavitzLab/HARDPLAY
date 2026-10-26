@@ -15,10 +15,10 @@ struct QueuePolicyControls: View {
             Text("ALL").font(.stage(size:8,weight:.semibold)).foregroundStyle(.secondary)
             ForEach(FadeMode.allCases,id:\.self) { mode in
                 Button { player.setFadeModeForAll(mode) } label: {
-                    Text(mode == .none ? "0":"\(Int(mode.seconds))s").font(.stage(size:10,weight:.semibold,design:.monospaced)).frame(width:29,height:28)
+                    Text(mode == .none ? "0":"\(String(format:"%g",mode.seconds))s").font(.stage(size:10,weight:.semibold,design:.monospaced)).frame(width:29,height:28)
                 }.buttonStyle(PlayerControlStyle(active:player.uniformFadeMode == mode))
-                    .accessibilityLabel(mode == .none ? "All Fades Off":"All Fades \(Int(mode.seconds)) Seconds")
-                    .stageHint(mode == .none ? "All tracks · no crossfade":"All tracks · \(Int(mode.seconds)) s crossfade",below:true)
+                    .accessibilityLabel(mode == .none ? "All Fades Off":"All Fades \(String(format:"%g",mode.seconds)) Seconds")
+                    .stageHint(mode == .none ? "All tracks · no crossfade":"All tracks · \(String(format:"%g",mode.seconds)) s crossfade",below:true)
                     .disabled(player.tracks.isEmpty)
             }
         }.disabled(setup.editsBlocked)

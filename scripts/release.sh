@@ -6,7 +6,8 @@ app="$PWD/build/HARDPLAY.app"
 version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
 arch=$(uname -m)
 release="$PWD/build/release"
-staging="$PWD/build/dmg-staging"
+staging=$(mktemp -d "$PWD/build/dmg-stage-XXXXXXXX")
+trap 'rm -rf -- "$staging"' EXIT
 mkdir -p "$release" "$staging"
 ditto "$app" "$staging/HARDPLAY.app"
 ln -sfn /Applications "$staging/Applications"

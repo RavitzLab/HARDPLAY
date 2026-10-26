@@ -2,7 +2,7 @@ import AppKit
 
 enum PlaylistPanelLayout {
     // Header, count, fixed bottom controls and enough room for a short scrolling queue.
-    static func minimumContentHeight(hints:Bool)->CGFloat {340+(hints ? HintMetrics.totalHeight:0)}
+    static func minimumContentHeight(hints:Bool)->CGFloat {400+(hints ? HintMetrics.totalHeight:0)}
     static func fittedFrame(current:NSRect,visible:NSRect,minimum:NSSize)->NSRect {
         let width=min(visible.width,max(current.width,minimum.width))
         let height=min(visible.height,max(current.height,minimum.height))

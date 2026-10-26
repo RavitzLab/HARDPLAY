@@ -30,7 +30,7 @@ enum BackupPackage {
                 guard hash == expected.sha256,size == expected.bytes else {throw BackupFailure("Audio changed during export: \(item.title). Check the set again.")}
                 names[expected.sha256]=filename
             }
-            entries.append(.init(path:"Audio/"+filename,bookmark:nil,fade:item.fade,position:Double(expected.positionMS)/1000,title:item.title,occurrenceID:item.occurrenceID ?? UUID().uuidString))
+            entries.append(.init(path:"Audio/"+filename,bookmark:nil,fade:item.fade,position:Double(expected.positionMS)/1000,title:item.title,occurrenceID:item.occurrenceID ?? UUID().uuidString,startPoint:item.startPoint,addedAt:item.addedAt))
         }
         try SavedPlaylist(name:input.name,tracks:entries,selectedIndex:entries.isEmpty ? nil:0,options:input.options).write(to:staging.appendingPathComponent("Set.hardplay"))
         let encoder=JSONEncoder();encoder.outputFormatting=[.prettyPrinted,.sortedKeys]

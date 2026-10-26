@@ -11,14 +11,14 @@ enum StageTypography {
            let name=CTFontDescriptorCopyAttribute(descriptor,kCTFontNameAttribute) as? String {return name}
         return "BalsamiqSans-Bold"
     }()
-    static func native(_ size:CGFloat)->NSFont {NSFont(name:name,size:size) ?? NSFont(name:"MarkerFelt-Wide",size:size) ?? .systemFont(ofSize:size)}
+    static func native(_ size:CGFloat)->NSFont {if AppearancePreferences.shared.theme.usesMono {return .monospacedSystemFont(ofSize:size,weight:.medium)};return NSFont(name:name,size:size) ?? NSFont(name:"MarkerFelt-Wide",size:size) ?? .systemFont(ofSize:size)}
 }
 extension Font {
-    static func stage(size:CGFloat,weight:Font.Weight = .regular,design:Font.Design = .default)->Font {.custom(StageTypography.name,size:size)}
+    static func stage(size:CGFloat,weight:Font.Weight = .regular,design:Font.Design = .default)->Font {if AppearancePreferences.shared.theme.usesMono {return .system(size:size,weight:weight,design:.monospaced)};return .custom(StageTypography.name,size:size)}
     static func stage(_ style:Font.TextStyle,design:Font.Design = .default)->Font {
         let size:CGFloat
         switch style {case .largeTitle:size=28;case .title:size=24;case .title2:size=20;case .title3:size=17;case .headline:size=14;case .subheadline:size=12;case .callout:size=13;case .caption:size=11;case .caption2:size=10;case .footnote:size=11;default:size=14}
-        return .custom(StageTypography.name,size:size)
+        return .stage(size:size,design:design)
     }
 }
 
@@ -86,10 +86,7 @@ struct MiniStageLabel:View {
     var body:some View {
         HStack(spacing:8) {
             MarkerIcon(systemName:"player.mini",size:19)
-            VStack(alignment:.leading,spacing:-3) {
-                Text("mini").font(.custom(CrewMarker.name,size:11))
-                Text("hardplay").font(.custom(CrewMarker.name,size:18))
-            }
-        }.foregroundStyle(tapeInk).padding(.horizontal,10).frame(height:40).background(TapeSurface())
+            Text("Mini").font(.stage(size:12,weight:.semibold))
+        }.padding(.horizontal,10).frame(height:32)
     }
 }

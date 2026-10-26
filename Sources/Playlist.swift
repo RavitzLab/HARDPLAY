@@ -15,6 +15,8 @@ struct SavedPlaylist: Codable {
         var title: String? = nil
         var occurrenceID: String? = nil
         var identity:String? = nil
+        var startPoint:TrackStartPoint? = nil
+        var addedAt:Date? = nil
     }
     struct Options: Codable {
         var startMode: StartMode
@@ -22,6 +24,7 @@ struct SavedPlaylist: Codable {
         var stopBeforeEnd: Double
         var shuffle: Bool
         var repeatAll: Bool
+        var repeatOne: Bool? = nil
     }
     static func relativePath(_ url: URL, to directory: URL) -> String {
         let a = directory.standardizedFileURL.pathComponents, b = url.standardizedFileURL.pathComponents
@@ -38,7 +41,7 @@ struct SavedPlaylist: Codable {
         guard data.count <= 5_000_000 else { throw PlaylistError.invalid }
         let value = try JSONDecoder().decode(Self.self,from:data)
         guard value.version == 1, value.tracks.count <= 10000,
-              value.tracks.allSatisfy({ !$0.path.isEmpty && $0.position.isFinite && $0.position >= 0 && ($0.occurrenceID.map { UUID(uuidString:$0) != nil } ?? true) && ($0.identity.map {$0.hasPrefix("/") && $0.utf8.count<=4096 && !$0.contains("\0")} ?? true) }),
+              value.tracks.allSatisfy({ !$0.path.isEmpty && ($0.startPoint?.valid ?? true) && $0.position.isFinite && $0.position >= 0 && ($0.occurrenceID.map { UUID(uuidString:$0) != nil } ?? true) && ($0.identity.map {$0.hasPrefix("/") && $0.utf8.count<=4096 && !$0.contains("\0")} ?? true) }),
               value.options.stopBeforeEnd.isFinite, (0...30).contains(value.options.stopBeforeEnd),
               (value.selectedIndex.map({value.tracks.indices.contains($0)}) ?? true),
               (value.highlightedIndex.map({value.tracks.indices.contains($0)}) ?? true) else { throw PlaylistError.invalid }

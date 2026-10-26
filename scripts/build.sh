@@ -12,13 +12,13 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundleIconFile</key><string>HardPlayWordmark.icns</string>
 <key>CFBundleExecutable</key><string>HARDPLAY</string>
 <key>CFBundleIdentifier</key><string>local.hardplay.player</string>
 <key>CFBundleName</key><string>Hard Play</string>
 <key>CFBundleDisplayName</key><string>Hard Play</string>
-<key>CFBundleVersion</key><string>43</string>
-<key>CFBundleShortVersionString</key><string>0.28.5</string>
+<key>CFBundleVersion</key><string>75</string>
+<key>CFBundleShortVersionString</key><string>0.35.2</string>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
 <key>CFBundleLocalizations</key><array><string>en</string></array>
 <key>UTExportedTypeDeclarations</key><array><dict><key>UTTypeIdentifier</key><string>local.hardplay.playlist</string><key>UTTypeDescription</key><string>HARDPLAY Playlist</string><key>UTTypeConformsTo</key><array><string>public.json</string></array><key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>hardplay</string></array><key>public.mime-type</key><string>application/vnd.hardplay.playlist+json</string></dict></dict></array>
@@ -31,20 +31,21 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleDocumentTypes</key><array><dict><key>CFBundleTypeName</key><string>HARDPLAY Playlist</string><key>CFBundleTypeRole</key><string>Editor</string><key>LSHandlerRank</key><string>Owner</string><key>LSItemContentTypes</key><array><string>local.hardplay.playlist</string></array></dict><dict><key>CFBundleTypeName</key><string>Audio</string><key>CFBundleTypeRole</key><string>Viewer</string><key>LSHandlerRank</key><string>Alternate</string><key>LSItemContentTypes</key><array><string>public.audio</string></array></dict></array>
 </dict></plist>
 PLIST
-cp assets/branding/hardplay-beams-icon-v1.png "$APP/Contents/Resources/HardPlayBeams.png"
+cp assets/branding/hardplay-wordmark-source.png "$APP/Contents/Resources/HardPlayWordmark.png"
 cp assets/fonts/BalsamiqSans-Bold.ttf "$APP/Contents/Resources/"
 cp assets/fonts/BalsamiqSans-OFL.txt "$APP/Contents/Resources/"
 cp assets/fonts/PermanentMarker-Regular.ttf "$APP/Contents/Resources/"
 cp assets/fonts/PermanentMarker-LICENSE.txt "$APP/Contents/Resources/"
 rm -f "$APP/Contents/Resources/RedKeycap.png" "$APP/Contents/Resources/HardPlayButton.png"
-sips -z 1024 1024 assets/branding/hardplay-beams-icon-v1.png --out "$PWD/build/icon.png" >/dev/null
+rm -f "$APP/Contents/Resources/HardPlayIcon.icns" "$APP/Contents/Resources/AppIcon.icns" "$APP/Contents/Resources/HardPlayBeams.png"
+"$APP/Contents/MacOS/HARDPLAY" --render-brand-icon "$PWD/build/icon.png"
 mkdir -p "$PWD/build/AppIcon.iconset"
 for size in 16 32 128 256 512; do
     sips -z "$size" "$size" "$PWD/build/icon.png" --out "$PWD/build/AppIcon.iconset/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
     sips -z "$double" "$double" "$PWD/build/icon.png" --out "$PWD/build/AppIcon.iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
-python3 - "$PWD/build/AppIcon.iconset" "$APP/Contents/Resources/AppIcon.icns" <<'PYICON'
+python3 - "$PWD/build/AppIcon.iconset" "$APP/Contents/Resources/HardPlayWordmark.icns" <<'PYICON'
 import pathlib, struct, sys
 root = pathlib.Path(sys.argv[1])
 chunks = []

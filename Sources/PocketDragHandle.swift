@@ -4,7 +4,7 @@ import SwiftUI
 final class PocketPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
-    static func limitedSize(_ proposed:NSSize)->NSSize {NSSize(width:min(560,max(344,proposed.width)),height:min(640,max(320,proposed.height)))}
+    static func limitedSize(_ proposed:NSSize)->NSSize {NSSize(width:min(560,max(344,proposed.width)),height:min(640,max(380,proposed.height)))}
     // The invisible space reserved for the lock drawer must not push the player away from the screen edge.
     static func constrainedFrame(_ proposed:NSRect,visible:NSRect)->NSRect {
         var frame=proposed
@@ -22,7 +22,8 @@ struct PocketDragHandle: NSViewRepresentable {
     final class HandleView:NSView {
         override var mouseDownCanMoveWindow:Bool { false }
         override func draw(_ dirtyRect:NSRect) {
-            ("HARDPLAY" as NSString).draw(at:NSPoint(x:0,y:(bounds.height-10)/2),withAttributes:[.font:StageTypography.native(8),.foregroundColor:NSColor(Color(stageHex:AppearancePreferences.shared.theme.text)).withAlphaComponent(0.7),.kern:1])
+            let color=Player.shared.playing ? NSColor.systemRed:NSColor(Color(stageHex:AppearancePreferences.shared.theme.text))
+            HardPlayBrand.logo(color:color,size:NSSize(width:34,height:18)).draw(in:NSRect(x:(bounds.width-34)/2,y:(bounds.height-18)/2,width:34,height:18))
         }
         private var initialMouse:NSPoint?
         private var initialFrame:NSRect?
@@ -50,7 +51,7 @@ struct PocketDragHandle: NSViewRepresentable {
         override func resetCursorRects() { addCursorRect(bounds,cursor:FloatingPlacement.shared.pocketLocked ? .arrow:.openHand) }
     }
     func makeNSView(context:Context)->HandleView { let view=HandleView();view.setAccessibilityElement(true);view.setAccessibilityRole(.staticText);view.setAccessibilityLabel("HARDPLAY");view.setAccessibilityHelp("Drag here to move the player anywhere");view.setAccessibilityValue("Ready to move");return view }
-    func updateNSView(_ view:HandleView,context:Context){view.window?.invalidateCursorRects(for:view)}
+    func updateNSView(_ view:HandleView,context:Context){view.needsDisplay=true;view.window?.invalidateCursorRects(for:view)}
 }
 
 /// A visible grip is needed for the borderless companion window.

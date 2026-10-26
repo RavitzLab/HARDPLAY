@@ -1,8 +1,8 @@
 import AppKit
 
 enum EmbeddedPlaylistLayout {
-    static func fittedFrame(current:NSRect,visible:NSRect,height:CGFloat)->NSRect {
-        let height=min(visible.height,max(420,ceil(height)))
+    static func fittedFrame(current:NSRect,visible:NSRect,height:CGFloat,minimumHeight:CGFloat=420)->NSRect {
+        let height=min(visible.height,max(minimumHeight,ceil(height)))
         let width=min(current.width,visible.width)
         let top=min(visible.maxY,max(visible.minY+height,current.maxY))
         return NSRect(x:min(max(current.minX,visible.minX),visible.maxX-width),y:top-height,width:width,height:height)

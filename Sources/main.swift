@@ -7,22 +7,41 @@ import Carbon
 import CoreMIDI
 import Combine
 
+struct TrackStartPoint:Codable,Equatable {
+    var seconds:Double
+    var once:Bool
+    var valid:Bool {seconds.isFinite && seconds>=0 && seconds<604800}
+}
+
 struct Track: Identifiable, Codable, Equatable {
     var id: String { occurrenceID ?? identity ?? url.path }
     let url: URL
     var customTitle: String? = nil
     var occurrenceID: String? = nil
     var identity: String? = nil
+    var startPoint:TrackStartPoint? = nil
+    var addedAt:Date? = Date()
     var title: String { customTitle ?? url.deletingPathExtension().lastPathComponent }
     var format: String { url.pathExtension.uppercased() }
 }
 
+enum RepeatMode:String,CaseIterable {case off,one,all}
+
 enum StartMode: String, CaseIterable, Codable { case beginning, resume }
 enum EndMode: String, CaseIterable, Codable { case next, stop }
-enum FadeMode: String, CaseIterable, Codable {
-    case none, short, long
-    var seconds: Double { switch self { case .none: return 0; case .short: return 3; case .long: return 6 } }
-    var title: String { switch self { case .none: return "Off"; case .short: return "Short"; case .long: return "Long" } }
+struct FadeMode:RawRepresentable,Hashable,CaseIterable,Codable {
+    let rawValue:String
+    init?(rawValue:String) {
+        guard ["none","short","long"].contains(rawValue) || (rawValue.hasPrefix("seconds:") && Double(rawValue.dropFirst(8)).map {$0.isFinite && $0>0 && $0<=30} == true) else {return nil}
+        self.rawValue=rawValue
+    }
+    static let none=FadeMode(rawValue:"none")!,short=FadeMode(rawValue:"short")!,long=FadeMode(rawValue:"long")!,standard=FadeMode(rawValue:"seconds:2.0")!
+    static let allCases:[FadeMode]=[.none,.standard,.short,.long]
+    static func duration(_ seconds:Double)->FadeMode {guard seconds.isFinite else {return .none};let value=(min(30,max(0,seconds))*10).rounded()/10;return value == 0 ? .none:value == 3 ? .short:value == 6 ? .long:FadeMode(rawValue:"seconds:\(value)")!}
+    var seconds:Double {rawValue == "none" ? 0:rawValue == "short" ? 3:rawValue == "long" ? 6:Double(rawValue.dropFirst(8))!}
+    var title:String {self == .none ? "Off":String(format:"%g s",seconds)}
+    init(from decoder:Decoder)throws {let box=try decoder.singleValueContainer();let value=try box.decode(String.self);guard let mode=FadeMode(rawValue:value) else {throw DecodingError.dataCorruptedError(in:box,debugDescription:"Invalid crossfade duration")};self=mode}
+    func encode(to encoder:Encoder)throws {var box=encoder.singleValueContainer();try box.encode(rawValue)}
 }
 
 final class Player: ObservableObject {
@@ -41,8 +60,11 @@ final class Player: ObservableObject {
     @Published var elapsed: Double = 0
     @Published var duration: Double = 0
     @Published var volume: Double = 0.8 { didSet { applyMixVolumes(); persist() } }
-    @Published var shuffle = false { didSet { cancelCrossfade() } }
-    @Published var repeatAll = false { didSet { cancelCrossfade() } }
+    @Published var shuffle = false { didSet { cancelCrossfade();persist() } }
+    @Published var repeatAll = false {didSet {if repeatAll && repeatOne {repeatOne=false};nextChoice=nil;cancelCrossfade();persist()}}
+    @Published var repeatOne = false {didSet {if repeatOne && repeatAll {repeatAll=false};nextChoice=nil;cancelCrossfade();persist()}}
+    var repeatMode:RepeatMode {repeatOne ? .one:(repeatAll ? .all:.off)}
+    func setRepeat(_ mode:RepeatMode) {guard !setupLock.settingsBlocked,!ControlLock.shared.isLocked else {return};repeatOne=mode == .one;repeatAll=mode == .all;if mode != .off {endMode = .next}}
     @Published var error: String?
     @Published var startMode: StartMode = .beginning { didSet { persist() } }
     @Published var endMode: EndMode = .next { didSet { if endMode == .stop { cancelCrossfade() }; configureEndBoundary(); persist() } }
@@ -68,6 +90,7 @@ final class Player: ObservableObject {
     private var restoring = true
     private let defaults: UserDefaults
     private var positions: [String: Double] = [:]
+    private var armedStartPoints:Set<String>=[]
     private var endBoundary: Any?
     private(set) var isLoading = false
     private var lastCheckpoint: Double = -1
@@ -96,16 +119,20 @@ final class Player: ObservableObject {
         positions = defaults.dictionary(forKey: "positions") as? [String: Double] ?? [:]
         startMode = StartMode(rawValue: defaults.string(forKey: "startMode") ?? "") ?? .beginning
         endMode = EndMode(rawValue: defaults.string(forKey: "endMode") ?? "") ?? .next
+        shuffle=defaults.bool(forKey:"shuffle")
+        repeatOne=defaults.bool(forKey:"repeatOne");repeatAll = !repeatOne && defaults.bool(forKey:"repeatAll")
         stopBeforeEnd = min(30, max(0, defaults.double(forKey: "stopBeforeEnd")))
         var restoredTrackIDs: [String: String] = [:]
         bookmarks = defaults.dictionary(forKey: "bookmarks") as? [String: Data] ?? [:]
         if let data = defaults.data(forKey: "queue"), let saved = try? JSONDecoder().decode([Track].self, from: data) {
-            tracks = saved.map { track in
+            tracks = saved.enumerated().map { index, original in
+                var track=original
+                if track.addedAt == nil {track.addedAt=Date(timeIntervalSince1970:Double(index))}
                 guard let bookmark = bookmarks[track.id] else { return track }
                 var stale = false
                 guard let url = try? URL(resolvingBookmarkData: bookmark, options: .withSecurityScope, bookmarkDataIsStale: &stale) else { return track }
                 if url.startAccessingSecurityScopedResource() { accessed.insert(url) }
-                let restored = Track(url:url,customTitle:track.customTitle,occurrenceID:track.occurrenceID,identity:track.identity)
+                let restored = Track(url:url,customTitle:track.customTitle,occurrenceID:track.occurrenceID,identity:track.identity,startPoint:track.startPoint,addedAt:track.addedAt)
                 restoredTrackIDs[track.id] = restored.id
                 if let position = positions[track.id] { positions[restored.id] = position }
                 if let mode = transitionModes[track.id] { transitionModes[restored.id] = mode }
@@ -119,10 +146,12 @@ final class Player: ObservableObject {
         restoredTime = defaults.double(forKey: "elapsed")
         if defaults.object(forKey: "volume") != nil { volume = defaults.double(forKey: "volume") }
         engine.volume = Float(volume)
+        if remoteCommands {AudioRouting.shared.register(engine,role:.main)}
         installTimeObserver()
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
             guard let self, let item = note.object as? AVPlayerItem, item === self.engine.currentItem else { return }
             if self.endMode == .stop { self.pause(); self.stoppedAtBoundary = true }
+            else if self.repeatOne {self.repeatCurrent()}
             else if self.preparationTask == nil { self.next(automatic: true) }
         }
         restoring = false
@@ -230,8 +259,7 @@ final class Player: ObservableObject {
     var stageRight: Track? { isCrossfading ? current : nextTrack }
     var stageLeftTime: Double { isCrossfading ? (outgoing?.currentTime().seconds ?? 0) : elapsed }
     var stageLeftDuration: Double { isCrossfading ? outgoingDuration : duration }
-    @Published private(set) var waveformCues:[String:Double] = [:]
-    var stageRightTime: Double { isCrossfading ? elapsed : (nextTrack.flatMap { waveformCues[$0.id] } ?? prepared?.position ?? 0) }
+    var stageRightTime: Double { isCrossfading ? elapsed : (prepared?.position ?? 0) }
     var stageRightDuration: Double { isCrossfading ? duration : (prepared?.duration ?? 0) }
     var stageLeftGain: Double { current == nil ? 0 : (isCrossfading ? 1 - fadeProgress : 1) }
     var stageRightGain: Double { isCrossfading ? fadeProgress : 0 }
@@ -290,7 +318,7 @@ final class Player: ObservableObject {
         guard !entries.isEmpty else{return};recordEdit()
         let selected=Set(selectedQueueTracks.map(\.id)),index=tracks.lastIndex(where:{selected.contains($0.id)}).map {$0+1} ?? tracks.count
         let copies=entries.map {entry -> Track in
-            let copy=Track(url:entry.track.url,customTitle:entry.track.customTitle,occurrenceID:UUID().uuidString)
+            let copy=Track(url:entry.track.url,customTitle:entry.track.customTitle,occurrenceID:UUID().uuidString,startPoint:entry.track.startPoint)
             transitionModes[copy.id]=entry.fade;bookmarks[copy.id]=entry.bookmark;positions[copy.id]=0;return copy
         }
         tracks.insert(contentsOf:copies,at:index);selectedID=copies.first?.id;queueSelection=Set(copies.map(\.id));invalidateQueuePreparation();persist()
@@ -310,7 +338,7 @@ final class Player: ObservableObject {
     @discardableResult func duplicate(_ track:Track) -> Track? {
         guard !setupLock.editsBlocked,!ControlLock.shared.isLocked,let index=tracks.firstIndex(where:{$0.id == track.id}) else { return nil }
         recordEdit()
-        let copy=Track(url:track.url,customTitle:track.customTitle,occurrenceID:UUID().uuidString)
+        let copy=Track(url:track.url,customTitle:track.customTitle,occurrenceID:UUID().uuidString,startPoint:track.startPoint)
         tracks.insert(copy,at:index+1); transitionModes[copy.id]=fadeMode(after:track); positions[copy.id]=0
         bookmarks[copy.id]=bookmarks[track.id]; selectedID=copy.id; nextChoice=nil
         if !isCrossfading { preparationTask?.cancel(); preparationTask=nil; preparationID=nil; prepared?.player.pause(); prepared=nil; manualPreparation=false }
@@ -343,7 +371,7 @@ final class Player: ObservableObject {
         prepareCrossfade(to: track, manual: true)
     }
     private func checkAutomaticCrossfade() {
-        guard playing, !isLoading, !isCrossfading, endMode == .next, let current, failedPreparationSource != currentID else { return }
+        guard playing, !repeatOne, !isLoading, !isCrossfading, endMode == .next, let current, failedPreparationSource != currentID else { return }
         let length = min(fadeMode(after: current).seconds, duration / 2)
         guard length > 0 else { return }
         if let prepared, !manualPreparation, duration - elapsed <= min(length, prepared.duration / 2) {
@@ -355,8 +383,8 @@ final class Player: ObservableObject {
     }
     private func prepareCrossfade(to track: Track, manual: Bool) {
         guard let source = currentID else { return }
-        let cue = waveformCues[track.id]
-        let requestedPosition = cue ?? (manual && startMode == .resume ? positions[track.id, default: 0] : 0)
+        let cue = startPoint(for:track)
+        let requestedPosition = cue?.seconds ?? (manual && startMode == .resume ? positions[track.id, default: 0] : 0)
         let token = UUID(); preparationID = token; manualPreparation = manual
         preparationTask = Task { @MainActor [weak self] in
             do {
@@ -365,6 +393,7 @@ final class Player: ObservableObject {
                 let seconds = try await asset.load(.duration).seconds
                 guard seconds.isFinite, seconds > 0, try await asset.load(.isPlayable) else { throw CocoaError(.fileReadCorruptFile) }
                 let incoming = AVPlayer(playerItem: AVPlayerItem(asset: asset)); incoming.volume = 0
+                if self?.publishNowPlaying == true {AudioRouting.shared.register(incoming,role:.main)}
                 // Prepare the second decoder while the current track continues playing.
                 for _ in 0..<100 {
                     try Task.checkCancellation()
@@ -373,7 +402,7 @@ final class Player: ObservableObject {
                     try await Task.sleep(nanoseconds: 50_000_000)
                 }
                 guard incoming.currentItem?.status == .readyToPlay else { throw CocoaError(.fileReadUnknown) }
-                let position = cue != nil ? min(max(0,requestedPosition),max(0,seconds-1/600)) : (requestedPosition < seconds - 0.1 ? max(0, requestedPosition) : 0)
+                let position = cue != nil ? min(requestedPosition,max(0,seconds-1/600)) : (requestedPosition < seconds - 0.1 ? max(0, requestedPosition) : 0)
                 await incoming.seek(to: CMTime(seconds: position, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
                 guard !Task.isCancelled, let self, self.preparationID == token, self.currentID == source else { incoming.pause(); return }
                 self.preparationTask = nil
@@ -401,12 +430,11 @@ final class Player: ObservableObject {
         outgoingTrack = current; outgoingDuration = duration; nextChoice = nil
         outgoing = engine; engine = ready.player; prepared = nil; preparationID = nil; manualPreparation = false
         if selectedID == nil || selectedID == currentID { selectedID=ready.track.id }
-        waveformCues.removeValue(forKey:ready.track.id)
         commitDeck(ready.track.id)
         currentID = ready.track.id; duration = ready.duration; elapsed = ready.position; stoppedAtBoundary = false; lastCheckpoint = -1; error = nil
         fadeLength = length; fadeStart = ready.position; fadeProgress = 0; isCrossfading = true
         installTimeObserver(); configureEndBoundary(); watchFailure(of: engine.currentItem!); applyMixVolumes()
-        if shouldPlay { engine.play() } else { outgoing?.pause() }
+        if shouldPlay { engine.play();consumeStartPoint(ready.track) } else { outgoing?.pause() }
         playing = shouldPlay; nowPlaying(); persist()
         fadeTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -434,6 +462,8 @@ final class Player: ObservableObject {
         d.set(positions, forKey: "positions")
         d.set(startMode.rawValue, forKey: "startMode")
         d.set(endMode.rawValue, forKey: "endMode")
+        d.set(shuffle,forKey:"shuffle")
+        d.set(repeatOne,forKey:"repeatOne");d.set(repeatAll,forKey:"repeatAll")
         d.set(stopBeforeEnd, forKey: "stopBeforeEnd")
         d.set(try? JSONEncoder().encode(transitionModes), forKey: "transitionModes")
         d.set(playlistURL?.path, forKey:"playlistURL")
@@ -468,6 +498,13 @@ final class Player: ObservableObject {
         tracks[index].customTitle = trimmed.isEmpty ? nil : String(trimmed.prefix(300))
         persist(); nowPlaying()
     }
+    func requestRenamePlaylist() {
+        guard !setupLock.editsBlocked,!ControlLock.shared.isLocked else {return}
+        let alert=NSAlert();alert.messageText="Rename playlist"
+        let field=NSTextField(string:playlistName);field.frame=NSRect(x:0,y:0,width:280,height:28)
+        alert.accessoryView=field;alert.addButton(withTitle:"Rename");alert.addButton(withTitle:"Cancel");alert.window.initialFirstResponder=field
+        if alert.runModal() == .alertFirstButtonReturn {renameSet(to:field.stringValue)}
+    }
     func renameSet(to title:String) {
         guard !setupLock.editsBlocked,!ControlLock.shared.isLocked else {return}
         let value=String(title.replacingOccurrences(of:"\n",with:" ").replacingOccurrences(of:"\r",with:" ").trimmingCharacters(in:.whitespacesAndNewlines).prefix(100))
@@ -482,9 +519,9 @@ final class Player: ObservableObject {
     func writePlaylist(to url: URL) throws {
         rememberPosition()
         let file = SavedPlaylist(name:playlistName,
-            tracks:tracks.map { SavedPlaylist.Entry(path:SavedPlaylist.relativePath($0.url,to:url.deletingLastPathComponent()),bookmark:bookmarks[$0.id],fade:fadeMode(after:$0),position:positions[$0.id] ?? 0,title:$0.customTitle,occurrenceID:$0.occurrenceID,identity:$0.identity) },
+            tracks:tracks.map { SavedPlaylist.Entry(path:SavedPlaylist.relativePath($0.url,to:url.deletingLastPathComponent()),bookmark:bookmarks[$0.id],fade:fadeMode(after:$0),position:positions[$0.id] ?? 0,title:$0.customTitle,occurrenceID:$0.occurrenceID,identity:$0.identity,startPoint:$0.startPoint,addedAt:$0.addedAt) },
             selectedIndex:tracks.firstIndex { $0.id == currentID },highlightedIndex:tracks.firstIndex { $0.id == selectedID },
-            options:.init(startMode:startMode,endMode:endMode,stopBeforeEnd:stopBeforeEnd,shuffle:shuffle,repeatAll:repeatAll))
+            options:.init(startMode:startMode,endMode:endMode,stopBeforeEnd:stopBeforeEnd,shuffle:shuffle,repeatAll:repeatAll,repeatOne:repeatOne))
         try file.write(to:url); notePlaylist(url); persist()
     }
     func readPlaylist(from url: URL) throws {
@@ -500,7 +537,7 @@ final class Player: ObservableObject {
                 if let bookmarked = try? URL(resolvingBookmarkData:data,options:.withSecurityScope,bookmarkDataIsStale:&stale) { target = bookmarked }
             }
             if target.startAccessingSecurityScopedResource() { accessed.insert(target) }
-            var track = Track(url:target,customTitle:entry.title,occurrenceID:entry.occurrenceID,identity:entry.identity)
+            var track = Track(url:target,customTitle:entry.title,occurrenceID:entry.occurrenceID,identity:entry.identity,startPoint:entry.startPoint,addedAt:entry.addedAt ?? Date(timeIntervalSince1970:Double(index)))
             if resolved.contains(where:{$0.id == track.id}) { track.occurrenceID=UUID().uuidString }
             if file.selectedIndex == index { selected = track.id }
             guard !resolved.contains(where:{$0.id == track.id}) else { continue }
@@ -511,9 +548,9 @@ final class Player: ObservableObject {
         pause(); loadingTask?.cancel(); failureObservation = nil; cancelCrossfade(); clearEndBoundary()
         engine.replaceCurrentItem(with:nil); isLoading = false
         restoring = true
-        resetDecks();waveformCues.removeAll(); tracks = resolved; selectedID=file.highlightedIndex.flatMap { resolved.indices.contains($0) ? resolved[$0].id:nil }; currentID = nil; elapsed = 0; duration = 0; positions = savedPositions; bookmarks = savedBookmarks; transitionModes = modes
+        resetDecks(); tracks = resolved; selectedID=file.highlightedIndex.flatMap { resolved.indices.contains($0) ? resolved[$0].id:nil }; currentID = nil; elapsed = 0; duration = 0; positions = savedPositions; bookmarks = savedBookmarks; transitionModes = modes
         startMode = file.options.startMode; endMode = file.options.endMode; stopBeforeEnd = file.options.stopBeforeEnd
-        shuffle = file.options.shuffle; repeatAll = file.options.repeatAll
+        shuffle = file.options.shuffle; repeatOne = file.options.repeatOne ?? false; repeatAll = !repeatOne && file.options.repeatAll
         notePlaylist(url);playlistName=file.name.isEmpty ? "My Set":String(file.name.prefix(100)); restoring = false
         let first = selected.flatMap { id in resolved.first { $0.id == id } } ?? resolved.first
         if let first { load(first,autoplay:false,position:savedPositions[first.id] ?? 0) }
@@ -528,7 +565,7 @@ final class Player: ObservableObject {
         let clean=String(name.replacingOccurrences(of:"\n",with:" ").replacingOccurrences(of:"\r",with:" ").trimmingCharacters(in:.whitespacesAndNewlines).prefix(100))
         playlistURL=nil;playlistName=clean.isEmpty ? "My Set":clean
         resetDecks();tracks=[];selectedID=nil;currentID=nil;elapsed=0;duration=0
-        waveformCues.removeAll();positions.removeAll();bookmarks.removeAll();transitionModes.removeAll();error=nil
+        positions.removeAll();bookmarks.removeAll();transitionModes.removeAll();error=nil
         persist();nowPlaying()
     }
     /// Only the playlist document is trashed. Undo restores its queue as an unsaved set.
@@ -611,9 +648,10 @@ final class Player: ObservableObject {
     func load(_ track: Track, autoplay: Bool = true, position: Double? = nil, precisePosition:Bool = false) {
         rememberPosition()
         cancelCrossfade()
-        let cue = waveformCues.removeValue(forKey:track.id)
+        if !autoplay,startPoint(for:track) != nil {armedStartPoints.insert(track.id)}
+        let cue = autoplay ? startPoint(for:track):nil
         let exact = precisePosition || cue != nil
-        let startOffset = position ?? cue ?? (startMode == .resume ? positions[track.id, default: 0] : 0)
+        let startOffset = cue?.seconds ?? position ?? (startMode == .resume ? positions[track.id, default: 0] : 0)
         loadingTask?.cancel(); failureObservation = nil
         clearEndBoundary(); isLoading = true; stoppedAtBoundary = false; lastCheckpoint = -1
         if selectedID == nil || selectedID == currentID { selectedID=track.id }
@@ -650,7 +688,7 @@ final class Player: ObservableObject {
                 guard !Task.isCancelled else { return }
                 self.isLoading = false; self.elapsed = target
                 self.configureEndBoundary()
-                if autoplay, item.status != .failed { self.engine.play(); self.playing = self.engine.rate > 0 }
+                if autoplay, item.status != .failed { self.engine.play(); self.playing = self.engine.rate > 0;if self.playing {self.consumeStartPoint(track)} }
                 self.nowPlaying(); self.persist()
             } catch {
                 guard !Task.isCancelled else { return }
@@ -668,6 +706,7 @@ final class Player: ObservableObject {
         if !playing, let selected=selectedTrack, selected.id != currentID { play(selected); return }
         if engine.currentItem == nil || engine.currentItem?.status == .failed { if let track = current ?? tracks.first { load(track) }; return }
         if playing { pause() } else {
+            if let track=current,armedStartPoints.contains(track.id),startPoint(for:track) != nil {load(track);return}
             if duration > 0 && elapsed >= duration - 0.1 { seek(0) }
             stoppedAtBoundary = false; engine.play(); outgoing?.play(); playing = engine.rate > 0
         }
@@ -692,24 +731,77 @@ final class Player: ObservableObject {
         guard let track = current else { return }
         load(track, autoplay: true, position: positions[track.id] ?? elapsed)
     }
-    /// NEXT gestures set a one-shot cue; only an explicit double-click starts that deck.
+    /// Only sounding decks accept waveform gestures; NEXT is inspection-only.
     func waveformAction(_ track:Track,seconds:Double,duration knownDuration:Double,play:Bool) {
         guard !ControlLock.shared.isLocked,!setupLock.playbackBlocked,
               seconds.isFinite,knownDuration.isFinite,knownDuration>0,
               tracks.contains(where:{$0.id == track.id && $0.url == track.url}) else {return}
         let target=min(max(0,seconds),max(0,knownDuration-1/600))
-        if play {
-            guard !setupLock.selectionBlocked else {return}
-            selectedID=track.id
-            load(track,autoplay:true,position:target,precisePosition:true)
-        }else if track.id == currentID {seek(target)}
-        else if isCrossfading,track.id == outgoingTrack?.id {
+        if track.id == currentID {
+            seek(target)
+            if play,!isLoading {engine.play();playing=true}
+        }else if isCrossfading,track.id == outgoingTrack?.id {
             outgoing?.seek(to:CMTime(seconds:target,preferredTimescale:600),toleranceBefore:.zero,toleranceAfter:.zero)
-        }else {
-            guard !setupLock.selectionBlocked,track.id == nextTrack?.id else {return}
-            waveformCues[track.id]=target
-            preparationTask?.cancel();preparationTask=nil;preparationID=nil
-            prepared?.player.pause();prepared=nil;manualPreparation=false;failedPreparationSource=nil
+        }
+    }
+    static func startTime(_ text:String)->Double? {
+        let parts=text.trimmingCharacters(in:.whitespacesAndNewlines).split(separator:":",omittingEmptySubsequences:false)
+        guard (1...2).contains(parts.count),let first=Double(parts[0]),first.isFinite,first>=0 else {return nil}
+        if parts.count == 1 {return first}
+        guard first.rounded(.down)==first,let seconds=Double(parts[1]),seconds.isFinite,seconds>=0,seconds<60 else {return nil}
+        let total=first*60+seconds
+        return total.isFinite ? total:nil
+    }
+    func startTrack(_ track:Track,at seconds:Double) {
+        guard !ControlLock.shared.isLocked,!setupLock.playbackBlocked,!setupLock.selectionBlocked,
+              seconds.isFinite,seconds>=0,tracks.contains(where:{$0.id==track.id && $0.url==track.url}) else {return}
+        selectedID=track.id
+        load(track,autoplay:true,position:seconds,precisePosition:true)
+    }
+    func startPoint(for track:Track)->TrackStartPoint? {
+        guard let point=tracks.first(where:{$0.id==track.id})?.startPoint,point.valid else {return nil}
+        return point
+    }
+    @discardableResult func setStartPoint(_ track:Track,seconds:Double,once:Bool)->Bool {
+        let point=TrackStartPoint(seconds:seconds,once:once)
+        guard point.valid,!ControlLock.shared.isLocked,!setupLock.editsBlocked,
+              let index=tracks.firstIndex(where:{$0.id==track.id && $0.url==track.url}) else {return false}
+        recordEdit();tracks[index].startPoint=point;armedStartPoints.insert(track.id)
+        invalidateQueuePreparation();persist();return true
+    }
+    func clearStartPoint(_ track:Track) {
+        guard !ControlLock.shared.isLocked,!setupLock.editsBlocked,let index=tracks.firstIndex(where:{$0.id==track.id}),tracks[index].startPoint != nil else {return}
+        recordEdit();tracks[index].startPoint=nil;armedStartPoints.remove(track.id);invalidateQueuePreparation();persist()
+    }
+    private func consumeStartPoint(_ track:Track) {
+        armedStartPoints.remove(track.id)
+        if let index=tracks.firstIndex(where:{$0.id==track.id}),tracks[index].startPoint?.once == true {tracks[index].startPoint=nil;persist()}
+    }
+    private func repeatCurrent() {if let track=current {load(track,position:0)}}
+    func requestStartAt(_ track:Track) {
+        guard !ControlLock.shared.isLocked,!setupLock.editsBlocked else {return}
+        let saved=startPoint(for:track)
+        let alert=NSAlert();alert.messageText="Track start time"
+        alert.informativeText="Enter seconds or m:ss, then choose how often to use this start time. Save keeps playback unchanged."
+        let field=NSTextField(string:saved.map {String(format:"%.2f",$0.seconds)} ?? "0:00")
+        field.placeholderString="47 or 0:47"
+        let scope=NSPopUpButton(frame:.zero,pullsDown:false);scope.addItems(withTitles:["Next playback only","Every playback"]);scope.selectItem(at:saved?.once == false ? 1:0)
+        let stack=NSStackView(views:[NSTextField(labelWithString:track.title),field,scope]);stack.orientation = .vertical;stack.alignment = .leading;stack.spacing=10;stack.frame=NSRect(x:0,y:0,width:320,height:100)
+        field.widthAnchor.constraint(equalToConstant:320).isActive=true
+        alert.accessoryView=stack
+        alert.addButton(withTitle:"Save");alert.addButton(withTitle:"Cancel")
+        let immediate=alert.addButton(withTitle:"Start immediately")
+        immediate.isEnabled = !setupLock.playbackBlocked && !setupLock.selectionBlocked
+        alert.window.initialFirstResponder=field
+        while true {
+            let response=alert.runModal()
+            guard response == .alertFirstButtonReturn || response == .alertThirdButtonReturn else {return}
+            guard let seconds=Self.startTime(field.stringValue),seconds<604800 else {
+                alert.informativeText="Use seconds or m:ss, from 0 up to 7 days. For example: 47 or 0:47.";continue
+            }
+            guard setStartPoint(track,seconds:seconds,once:scope.indexOfSelectedItem==0) else {return}
+            if response == .alertThirdButtonReturn {startTrack(track,at:seconds)}
+            return
         }
     }
     func seek(_ seconds: Double) {
@@ -735,10 +827,11 @@ final class Player: ObservableObject {
         }
     }
     func next(automatic: Bool = false) {
+        if automatic && repeatOne && endMode == .next {repeatCurrent();return}
         guard automatic || !setupLock.selectionBlocked else { return }
         guard !tracks.isEmpty else { return }
         if let target = upcomingTrack() {
-            if automatic { load(target, position: waveformCues[target.id] ?? 0, precisePosition:waveformCues[target.id] != nil) } else { play(target) }
+            if automatic { load(target, position:0) } else { play(target) }
         } else if !automatic { play(tracks[0]) }
         else { pause() }
     }
@@ -748,6 +841,43 @@ final class Player: ObservableObject {
         guard !tracks.isEmpty else { return }
         let index = tracks.firstIndex { $0.id == currentID } ?? 0
         play(tracks[max(0, index - 1)])
+    }
+    func sortQueue(_ order:PlaylistSort) {
+        guard !setupLock.editsBlocked,!ControlLock.shared.isLocked,tracks.count>1 else {return}
+        let original=tracks
+        let sorted:[Track]
+        if order == .reverse {sorted=Array(tracks.reversed())}
+        else if order == .random {sorted=tracks.shuffled()}
+        else {
+            func number(_ track:Track)->Double? {
+                guard let range=track.title.range(of:"[0-9]+",options:.regularExpression) else {return nil}
+                return Double(track.title[range])
+            }
+            sorted=tracks.enumerated().sorted {a,b in
+                var comparison:ComparisonResult = .orderedSame
+                switch order {
+                case .number,.numberDescending:
+                    let x=number(a.element),y=number(b.element)
+                    if let x,let y,x != y {comparison=x<y ? .orderedAscending:.orderedDescending}
+                    else if x != nil && y == nil {comparison = .orderedAscending}
+                    else if x == nil && y != nil {comparison = .orderedDescending}
+                    else {comparison=a.element.title.localizedStandardCompare(b.element.title)}
+                    if order == .numberDescending {comparison=comparison == .orderedAscending ? .orderedDescending:comparison == .orderedDescending ? .orderedAscending:.orderedSame}
+                case .name,.nameDescending:
+                    comparison=a.element.title.localizedStandardCompare(b.element.title)
+                    if order == .nameDescending {comparison=comparison == .orderedAscending ? .orderedDescending:comparison == .orderedDescending ? .orderedAscending:.orderedSame}
+                case .newest,.oldest:
+                    let x=a.element.addedAt ?? .distantPast,y=b.element.addedAt ?? .distantPast
+                    if x != y {comparison=(order == .oldest ? x<y:x>y) ? .orderedAscending:.orderedDescending}
+                case .filename:comparison=a.element.url.lastPathComponent.localizedStandardCompare(b.element.url.lastPathComponent)
+                case .format:comparison=a.element.format.localizedStandardCompare(b.element.format)
+                default:break
+                }
+                return comparison == .orderedSame ? a.offset<b.offset:comparison == .orderedAscending
+            }.map(\.element)
+        }
+        guard sorted != original else {return}
+        recordEdit(orderOnly:true);tracks=sorted;invalidateQueuePreparation();persist()
     }
     private func invalidateQueuePreparation() {
         nextChoice=nil
@@ -779,7 +909,7 @@ final class Player: ObservableObject {
             cancelCrossfade();clearEndBoundary();isLoading=false;loadingTask?.cancel();engine.pause();engine.replaceCurrentItem(with:nil);playing=false;self.currentID=nil;elapsed=0;duration=0
         }
         let selection=Set(selectedQueueTracks.map(\.id)).subtracting(ids)
-        for id in ids {waveformCues.removeValue(forKey:id);bookmarks.removeValue(forKey:id);positions.removeValue(forKey:id);transitionModes.removeValue(forKey:id)}
+        for id in ids {bookmarks.removeValue(forKey:id);positions.removeValue(forKey:id);transitionModes.removeValue(forKey:id)}
         tracks.removeAll {ids.contains($0.id)}
         if let selectedID,ids.contains(selectedID) {self.selectedID=tracks.first(where:{selection.contains($0.id)})?.id}
         queueSelection=selection;cancelCrossfade();persist();nowPlaying()
@@ -833,12 +963,13 @@ struct GlassBackdrop: NSViewRepresentable {
 }
 
 enum ControlOutline: Shape {
-    case circle, rounded, capsule, hardware
+    case circle, rounded, capsule, hardware, tape
     func path(in rect: CGRect) -> Path {
         switch self {
         case .circle: return Circle().path(in: rect)
         case .rounded: return RoundedRectangle(cornerRadius:8).path(in:rect)
         case .capsule: return Capsule().path(in: rect)
+        case .tape:return TapeEdge().path(in:rect)
         case .hardware:return RoundedRectangle(cornerRadius:6).path(in:rect)
         }
     }
@@ -851,15 +982,17 @@ struct PlayerControlStyle: ButtonStyle {
     var primary = false
     @Environment(\.isEnabled) private var enabled
     private var surface:ControlOutline {
+        if case .rounded=outline,appearance.theme.preset == "Crew Tape" {return .tape}
         if case .rounded=outline,["Road Case","Flightcase","Speaker Grille","FOH","Stage Crew","Stagehand"].contains(appearance.theme.preset) {return .hardware}
         return outline
     }
     func makeBody(configuration: Configuration) -> some View {
         let pressed=configuration.isPressed,lit=active || primary
+        let taped=appearance.theme.preset == "Crew Tape" && lit
         return configuration.label
-            .foregroundStyle(Color(stageHex:appearance.theme.text).opacity(enabled ? 0.94:0.52))
+            .foregroundStyle((taped ? tapeInk:Color(stageHex:appearance.theme.text)).opacity(enabled ? 0.94:0.52))
             .background {
-                surface.fill(Color(stageHex:appearance.theme.background))
+                surface.fill(taped ? tapeB:Color(stageHex:appearance.theme.background))
                     .overlay(surface.fill(lit ? accent.opacity(pressed ? 0.20:0.13):Color(stageHex:appearance.theme.text).opacity(pressed ? 0.075:0.035)))
             }
             .overlay(surface.stroke(lit ? accent.opacity(0.38):Color(stageHex:appearance.theme.text).opacity(0.11),lineWidth:0.8))
@@ -879,7 +1012,7 @@ struct TransitionControl: View {
             Text(inQueue ? "Fade →" : "Crossfade")
                 .font(.stage(size: 10, weight: .medium)).foregroundStyle(.secondary)
             Picker("Transition after \(track.title)", selection: Binding(get: { player.fadeMode(after: track) }, set: { player.setFadeMode($0, after: track) })) {
-                ForEach(FadeMode.allCases, id: \.self) { mode in Text(mode.title).tag(mode) }
+                ForEach(Array(Set(FadeMode.allCases+[player.fadeMode(after:track)])).sorted {$0.seconds<$1.seconds}, id: \.self) { mode in Text(mode.title).tag(mode) }
             }.pickerStyle(.segmented).labelsHidden().tint(accent)
                 .stageHint("Transition after this track: Off, Short (3 s), Long (6 s)")
         }
@@ -908,10 +1041,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var quickEditModel:QuickEditModel?
     private var quickEditWindowModel:QuickEditModel?
     var pocketWindow: NSPanel!
+    private let playbackPanel=PlaybackPanelController()
+    private let nanoPlaylist=NanoPlaylistController()
+    private var pocketDrawerWindow:NSPanel?
+    private var pocketDrawerPositioning=false
+    private var pocketDrawerReturn:(original:NSRect,placed:NSRect)?
+    private var pocketDrawerRevision=0
     var appearanceUpdates: AnyCancellable?
     var lockUpdates: AnyCancellable?
     var statusUpdates: AnyCancellable?
     var lastStatusBadge: MenuBarBadge?
+    private var statusTracking:NSTrackingArea?
+    private var hoverWork:DispatchWorkItem?
+    private var hoverOpened=false
+    private var collapsedToMenuBar=false
     private var arrangingWorkspace=false
     var hotKey: EventHotKeyRef?
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -922,11 +1065,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         status = NSStatusBar.system.statusItem(withLength: 46)
         if let button = status.button {
             button.image = MenuBarBadge.empty.image()
+            let tracking=NSTrackingArea(rect:button.bounds,options:[.mouseEnteredAndExited,.activeAlways,.inVisibleRect],owner:self,userInfo:nil)
+            button.addTrackingArea(tracking);statusTracking=tracking
             button.target = self; button.action = #selector(statusClick(_:)); button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         popover = NSPopover(); popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: PlayerView(compact: true, menuBar: true))
+        let menuController=NSHostingController(rootView:MenuBarPlayerView())
+        menuController.sizingOptions = [.preferredContentSize]
+        popover.contentViewController=menuController
         makeWindows()
+        PlaylistWindowState.shared.startInline()
         if WorkspaceState.shared.mode == .single {workspaceModeChanged()}
         appearanceUpdates = AppearancePreferences.shared.objectWillChange.receive(on:RunLoop.main).sink { _ in Player.shared.objectWillChange.send() }
         statusUpdates = Player.shared.objectWillChange
@@ -960,6 +1108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle:"Web Viewer…",action:#selector(showWebViewer),keyEquivalent:"")
         appMenu.addItem(withTitle: "Show Hard Play", action: #selector(showMain), keyEquivalent: "1")
         appMenu.addItem(withTitle: "Mini Player", action: #selector(toggleMini), keyEquivalent: "2")
+        appMenu.addItem(withTitle:"Menu Bar Controls",action:#selector(showMenuBarPlayer),keyEquivalent:"3")
+        appMenu.addItem(withTitle:"Preview on Preview Output",action:#selector(toggleMenuPreview),keyEquivalent:"")
         appMenu.addItem(withTitle:"Keyboard / MIDI…",action:#selector(showMappings),keyEquivalent:"m").keyEquivalentModifierMask = [.command,.shift]
         appMenu.addItem(withTitle:"Minimize Window",action:#selector(minimizeFrontWindow),keyEquivalent:"m")
         appMenu.addItem(withTitle: "Lock Controls", action: #selector(lockControls), keyEquivalent: "l")
@@ -976,18 +1126,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mainWindow.title = "Hard Play"; mainWindow.titlebarAppearsTransparent = true
         mainWindow.titleVisibility = .hidden; mainWindow.isMovableByWindowBackground = true
         mainWindow.isReleasedWhenClosed = false; mainWindow.delegate = self
-        mainWindow.contentView = NSHostingView(rootView: PlayerView().padding(.top, 20).background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
+        mainWindow.contentView = NSHostingView(rootView: PlayerView().padding(.top, 20).background(ThemedBackdrop(playerWindow:"main")).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
         mainWindow.center(); mainWindow.setFrameAutosaveName("HARDPLAY.stage.minimal.minimal.main")
         miniWindow = FloatingPanel(contentRect: NSRect(x: 100, y: 100, width: 380, height: 540), styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: false)
         miniWindow.isOpaque = false; miniWindow.backgroundColor = .clear
         miniWindow.appearance = NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
         miniWindow.title = "Hard Play Mini"; miniWindow.titleVisibility = .hidden; miniWindow.titlebarAppearsTransparent = true
-        miniWindow.standardWindowButton(.closeButton)?.isHidden = true
+        miniWindow.standardWindowButton(.closeButton)?.isHidden = false
         miniWindow.isMovableByWindowBackground = true;miniWindow.isMovable = !FloatingPlacement.shared.miniLocked; miniWindow.level = .floating
         miniWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         miniWindow.hidesOnDeactivate = false; miniWindow.isReleasedWhenClosed = false; miniWindow.delegate = self
-        miniWindow.contentView = NSHostingView(rootView: PlayerView(compact: true).padding(.top, 8).background(ThemedBackdrop()))
-        miniWindow.contentMinSize=NSSize(width:380,height:540);miniWindow.contentMaxSize=NSSize(width:760,height:1000)
+        miniWindow.contentView = NSHostingView(rootView: PlayerView(compact: true).padding(.top, 8).background(ThemedBackdrop(playerWindow:"mini")))
+        miniWindow.contentMinSize=NSSize(width:380,height:320);miniWindow.contentMaxSize=NSSize(width:760,height:1000)
         miniWindow.setFrameAutosaveName("HARDPLAY.stage.minimal.mini")
         playlistWindow = FloatingPanel(contentRect:NSRect(x:160,y:160,width:440,height:480),styleMask:[.titled,.closable,.miniaturizable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false)
         playlistWindow.title = "Hard Play Playlist"; playlistWindow.titlebarAppearsTransparent = true
@@ -1007,7 +1157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mappingWindow.appearance = NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
         mappingWindow.contentView = NSHostingView(rootView:MappingView().background(ThemedBackdrop()))
         mappingWindow.setFrameAutosaveName("HARDPLAY.mappings")
-        pocketWindow = PocketPanel(contentRect:NSRect(x:100,y:100,width:344,height:320),styleMask:[.borderless,.nonactivatingPanel,.resizable],backing:.buffered,defer:false)
+        pocketWindow = PocketPanel(contentRect:NSRect(x:100,y:100,width:344,height:380),styleMask:[.borderless,.nonactivatingPanel,.resizable],backing:.buffered,defer:false)
         pocketWindow.isOpaque=false;pocketWindow.backgroundColor = .clear;pocketWindow.level = .floating
         pocketWindow.title="Hard Play Pocket";pocketWindow.hasShadow=true;pocketWindow.isMovableByWindowBackground=true;pocketWindow.hidesOnDeactivate=false;pocketWindow.isReleasedWhenClosed=false
         pocketWindow.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
@@ -1015,10 +1165,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         pocketWindow.delegate=self;pocketWindow.isMovable = !FloatingPlacement.shared.pocketLocked
         pocketWindow.setFrameAutosaveName("HARDPLAY.pocket")
         if !pocketWindow.setFrameUsingName("HARDPLAY.pocket"),let frame=NSScreen.main?.visibleFrame { pocketWindow.setFrameOrigin(NSPoint(x:frame.maxX-360,y:frame.minY+24)) }
-        pocketWindow.minSize=NSSize(width:344,height:320);pocketWindow.maxSize=NSSize(width:560,height:640)
+        pocketWindow.minSize=NSSize(width:344,height:380);pocketWindow.maxSize=NSSize(width:560,height:640)
         let restored=pocketWindow.frame;let limited=PocketPanel.limitedSize(restored.size)
         pocketWindow.setContentSize(limited)
-        settingsWindow = utilityWindow(title:"Hard Play PATCH",width:370,height:500)
+        settingsWindow = utilityWindow(title:"Hard Play PATCH",width:420,height:680)
         settingsWindow.contentView = NSHostingView(rootView:PlayerView(settingsOnly:true).padding(20).background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
         themesWindow = utilityWindow(title:"Hard Play Themes",width:410,height:760)
         themesWindow.contentView = NSHostingView(rootView:ThemeEditorView().background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
@@ -1105,7 +1255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     func arrangeWorkspaceWindows(preferred:NSWindow?=nil) {
-        guard !arrangingWorkspace,let main=mainWindow,main.isVisible,!main.styleMask.contains(.fullScreen),let screen=main.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {return}
+        guard !arrangingWorkspace,let main=(miniWindow?.isVisible == true ? miniWindow:mainWindow),main.isVisible,!main.styleMask.contains(.fullScreen),let screen=main.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {return}
         arrangingWorkspace=true;defer {arrangingWorkspace=false}
         var windows=workspaceWindows.filter {window in
             window.isVisible && !window.isMiniaturized && (workspaceSection(for:window).map {WorkspaceState.shared.followsPlayer($0)} ?? (WorkspaceState.shared.mode == .nearby))
@@ -1122,10 +1272,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.setFrameAutosaveName(title)
         return window
     }
+    func toggleSettingsWindow() {
+        if WorkspaceState.shared.section == .settings {WorkspaceState.shared.player();return}
+        if settingsWindow.isVisible {settingsWindow.orderOut(nil);return}
+        showSettingsWindow()
+    }
     @objc func showSettingsWindow() {
+        let embeddedVisible=WorkspaceState.shared.section == .settings && mainWindow.isVisible
+        if !settingsWindow.isVisible && !embeddedVisible {
+            PatchWindowState.shared.selected = .audio
+        }
         if WorkspaceState.shared.present(.settings) {return}
         guard !ControlLock.shared.isLocked else { return }
-        if !settingsWindow.isVisible,WorkspaceState.shared.followsPlayer(.settings) { settingsWindow.setFrameOrigin(NSPoint(x:mainWindow.frame.maxX+12,y:mainWindow.frame.maxY-settingsWindow.frame.height)); settingsWindow.setFrame(settingsWindow.constrainFrameRect(settingsWindow.frame,to:mainWindow.screen),display:true) }
+        let owner=miniWindow.isVisible ? miniWindow!:mainWindow!
+        if !settingsWindow.isVisible,WorkspaceState.shared.followsPlayer(.settings) { settingsWindow.setFrameOrigin(NSPoint(x:owner.frame.maxX+12,y:owner.frame.maxY-settingsWindow.frame.height)); settingsWindow.setFrame(settingsWindow.constrainFrameRect(settingsWindow.frame,to:owner.screen),display:true) }
         restore(settingsWindow);NSApp.activate(ignoringOtherApps:true)
     }
     @objc func showThemesWindow() {
@@ -1136,6 +1296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         restore(themesWindow);NSApp.activate(ignoringOtherApps:true)
     }
     @objc func statusClick(_ sender: Any?) {
+        hoverWork?.cancel();hoverOpened=false
         if NSApp.currentEvent?.type == .rightMouseUp {
             let menu = NSMenu()
             menu.addItem(withTitle: "Open Queue", action: #selector(showMain), keyEquivalent: "")
@@ -1143,6 +1304,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             menu.addItem(withTitle:"Show Playlist Window",action:#selector(restorePlaylist),keyEquivalent:"")
             menu.addItem(withTitle:"Keyboard / MIDI…",action:#selector(showMappings),keyEquivalent:"")
             menu.addItem(withTitle:MenuBarPresentation.shared.attached ? "Detach Mini Player":"Attach Mini to Menu Bar",action:#selector(toggleMenuBarAttachment),keyEquivalent:"")
+            menu.addItem(withTitle:"PATCH · Audio Settings…",action:#selector(showSettingsWindow),keyEquivalent:"")
+            menu.addItem(withTitle:MenuPreviewPlayer.shared.playing ? "Stop Preview":"Preview on Preview Output",action:#selector(toggleMenuPreview),keyEquivalent:"")
             menu.addItem(withTitle: "Add Audio…", action: #selector(addFiles), keyEquivalent: "")
             menu.addItem(.separator()); menu.addItem(withTitle: "Quit Hard Play", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
             for item in menu.items where item.action != #selector(NSApplication.terminate(_:)) { item.target = self }
@@ -1166,8 +1329,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let content=height+20+(HintPreferences.shared.enabled ? HintMetrics.totalHeight:0)
         let chrome=max(0,window.frame.height-window.contentLayoutRect.height)
         let targetHeight=content+chrome+4
-        window.contentMinSize=NSSize(width:min(600,screen.width),height:min(420,screen.height-28))
-        let frame=EmbeddedPlaylistLayout.fittedFrame(current:window.frame,visible:screen,height:targetHeight)
+        let minimum:CGFloat = !PlaylistWindowState.shared.detached && PlaylistWindowState.shared.shown ? 420:320
+        window.contentMinSize=NSSize(width:min(600,screen.width),height:min(minimum,screen.height-28))
+        let frame=EmbeddedPlaylistLayout.fittedFrame(current:window.frame,visible:screen,height:targetHeight,minimumHeight:minimum)
         if abs(frame.height-window.frame.height)>1 || abs(frame.minY-window.frame.minY)>1 {window.setFrame(frame,display:true)}
     }
     func ensureEmbeddedPlaylistRoom() {
@@ -1178,7 +1342,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let frame=EmbeddedPlaylistLayout.frame(current:window.frame,visible:screen,tracks:Player.shared.tracks.count)
         if frame != window.frame {window.setFrame(frame,display:true)}
     }
-    @objc func showMain() { defer {WindowPresentation.shared.refresh()}; pocketWindow?.orderOut(nil); popover?.performClose(nil); ensureEmbeddedPlaylistRoom(); restore(mainWindow); NSApp.activate(ignoringOtherApps: true) }
+    enum PlayerSurface {case main,mini,nano,menuBar}
+    func toggleNanoPlaylist() {
+        if !NanoPlaylistState.shared.open {hidePocketDrawer(animated:false)}
+        nanoPlaylist.toggle()
+    }
+    func hideNanoPlaylist() {nanoPlaylist.hide()}
+    func togglePlaybackDrawer(fromMini:Bool) {playbackPanel.toggle(fromMini:fromMini)}
+    func hidePlaybackDrawer() {playbackPanel.hide()}
+    private func hideUtilityWindows() {
+        playbackPanel.hide(animated:false)
+        for window in workspaceWindows where workspaceSection(for:window) != nil {window.orderOut(nil)}
+        quickEditModel?.hover(nil);quickEditModel?.stopPreview()
+        ControlMappings.shared.mapping=false
+    }
+    /// Presentation changes hide existing windows; they never stop playback or discard editor models.
+    @discardableResult private func preparePlayerWindow(_ destination:PlayerSurface)->Bool {
+        if destination != .nano {hidePocketDrawer(animated:false);nanoPlaylist.hide()}
+        let followDock=PlaylistWindowState.shared.edge != nil && playlistWindow?.isVisible == true
+        hideUtilityWindows()
+        if destination != .main {mainWindow?.orderOut(nil)}
+        if destination != .mini {miniWindow?.orderOut(nil)}
+        if destination != .nano {pocketWindow?.orderOut(nil)}
+        if destination != .menuBar {popover?.performClose(nil)}
+        if destination == .nano || destination == .menuBar {playlistWindow?.orderOut(nil)}
+        return followDock
+    }
+    private func followPlaylistDock(_ follow:Bool,toMini:Bool) {
+        if follow,let edge=PlaylistWindowState.shared.edge {PlaylistWindowState.shared.dock(edge,fromMini:toMini)}
+        PlaylistWindowState.shared.syncVisibility()
+    }
+    @objc func showMain() {
+        collapsedToMenuBar=false
+        defer {WindowPresentation.shared.refresh()}
+        let follow=preparePlayerWindow(.main)
+        ensureEmbeddedPlaylistRoom();restore(mainWindow);followPlaylistDock(follow,toMini:false)
+        NSApp.activate(ignoringOtherApps:true)
+    }
     @objc func showMappings() {
         if WorkspaceState.shared.present(.mappings) {return}
         guard !ControlLock.shared.isLocked else { return }
@@ -1191,7 +1391,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if window === miniWindow || window === playlistWindow { DispatchQueue.main.async { PlaylistWindowState.shared.syncVisibility();ControlMappings.shared.refreshStates() } }
         }
     }
-    func showMini() { defer {WindowPresentation.shared.refresh()}; restore(miniWindow); ControlMappings.shared.refreshStates() }
+    func showMini() {
+        collapsedToMenuBar=false
+        defer {WindowPresentation.shared.refresh()}
+        let follow=preparePlayerWindow(.mini)
+        fitMiniPlaylist();restore(miniWindow);followPlaylistDock(follow,toMini:true)
+        ControlMappings.shared.refreshStates();NSApp.activate(ignoringOtherApps:true)
+    }
+    private var miniMeasuredHeight:CGFloat=0
+    func measureMiniContent(_ height:CGFloat) {guard height.isFinite,height>0,abs(height-miniMeasuredHeight)>0.5 else {return};miniMeasuredHeight=height;fitMiniPlaylist()}
+    func fitMiniPlaylist() {
+        guard let panel=miniWindow,let visible=panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {return}
+        let inline = !PlaylistWindowState.shared.detached && PlaylistWindowState.shared.shown
+        let chrome=max(0,panel.frame.height-panel.contentLayoutRect.height)
+        let height:CGFloat=miniMeasuredHeight>0 ? max(320,miniMeasuredHeight+8+chrome+(HintPreferences.shared.enabled ? HintMetrics.totalHeight:0)+4):(inline ? 640:400)
+        var frame=panel.frame
+        frame.origin.y=frame.maxY-min(height,visible.height);frame.size.height=min(height,visible.height)
+        frame.origin.y=max(visible.minY,frame.origin.y)
+        panel.setFrame(frame,display:true)
+    }
     func ensurePlaylistControlsVisible() {
         guard let panel=playlistWindow,let screen=panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else{return}
         let chrome=panel.frameRect(forContentRect:NSRect(x:0,y:0,width:380,height:100)).height-100
@@ -1204,7 +1422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func showPlaylistWindow() { ensurePlaylistControlsVisible();if WorkspaceState.shared.mode == .single {WorkspaceState.shared.toggle()}; restore(playlistWindow);PlaylistWindowState.shared.syncVisibility();ControlMappings.shared.refreshStates() }
     func toggleNano() {
         guard !ControlLock.shared.isLocked else {return}
-        if pocketWindow.isVisible && !pocketWindow.isMiniaturized {pocketWindow.orderOut(nil)}else {showPocket()}
+        if pocketWindow.isVisible && !pocketWindow.isMiniaturized {showMain()}else {showPocket()}
         WindowPresentation.shared.refresh()
     }
     func toggleStageFullScreen() {
@@ -1214,25 +1432,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowDidEnterFullScreen(_ notification:Notification) {WindowPresentation.shared.refresh()}
     func windowDidExitFullScreen(_ notification:Notification) {WindowPresentation.shared.refresh();WindowPresentation.shared.requestFit()}
     func windowDidBecomeKey(_ notification:Notification) {WindowPresentation.shared.refresh()}
-    @objc func toggleMini() { defer {WindowPresentation.shared.refresh()}; if miniWindow.isVisible && !miniWindow.isMiniaturized { miniWindow.orderOut(nil); ControlMappings.shared.refreshStates() } else { showMini() } }
+    @objc func toggleMini() { defer {WindowPresentation.shared.refresh()}; if miniWindow.isVisible && !miniWindow.isMiniaturized { showMain() } else { showMini() } }
     func restore(_ window: NSWindow) {
+        if workspaceSection(for:window) != nil {
+            playbackPanel.hide(animated:false)
+            if !mainWindow.isVisible && !miniWindow.isVisible {showMain()}
+            for other in workspaceWindows where other !== window && workspaceSection(for:other) != nil {other.orderOut(nil)}
+            if window !== mappingWindow {ControlMappings.shared.mapping=false}
+            if window !== quickEditWindow {quickEditModel?.hover(nil);quickEditModel?.stopPreview()}
+        }
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
         if workspaceWindows.contains(where:{$0 === window}) {arrangeWorkspaceWindows(preferred:window)}
     }
     func minimize(_ window: NSWindow) {
         guard !ControlLock.shared.isLocked else { return }
-        if window.styleMask.contains(.miniaturizable) { window.miniaturize(nil) } else { window.orderOut(nil) }
+        if window === mainWindow || window === miniWindow {hideUtilityWindows()}
+        if window.styleMask.contains(.miniaturizable) { window.miniaturize(nil) } else { window.orderOut(nil);if (window === mainWindow || window === miniWindow),WindowPresentation.shared.nanoOnMinimize {showPocket()} }
         ControlMappings.shared.refreshStates()
     }
     @objc func minimizeFrontWindow() {
         if popover.isShown { popover.performClose(nil) }
         else if let window = NSApp.keyWindow { minimize(window) }
     }
+    @objc func toggleMenuPreview() {MenuPreviewPlayer.shared.toggle()}
     @objc func restorePlaylist() { PlaylistWindowState.shared.detach() }
-    func showMenuBarPlayer() {
-        guard !popover.isShown, let button=status.button else { return }
-        popover.show(relativeTo:button.bounds,of:button,preferredEdge:.minY)
+    @objc func showMenuBarPlayer() {
+        hoverWork?.cancel();hoverOpened=false
+        presentMenuBarPlayer(focus:true)
+    }
+    private func presentMenuBarPlayer(focus:Bool) {
+        guard let button=status.button else {return}
+        if !popover.isShown {popover.show(relativeTo:button.bounds,of:button,preferredEdge:.minY)}
+        if focus {popover.contentViewController?.view.window?.makeKey()}
     }
     func attachMiniToMenuBar(hideMain: Bool = false) {
         guard !ControlLock.shared.isLocked else { return }
@@ -1254,16 +1486,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func updateStatusItem() {
         let player=Player.shared
         let badge=MenuBarBadge.state(hasTrack:player.current != nil,playing:player.playing,crossfading:player.isCrossfading,error:player.error)
-        if lastStatusBadge != badge { status.button?.image=badge.image(); lastStatusBadge=badge }
+        if lastStatusBadge != badge {
+            status.button?.image=badge.image();lastStatusBadge=badge
+            NSApp.applicationIconImage=player.playing ? HardPlayBrand.playingIcon:HardPlayBrand.idleIcon
+        }
         let details=player.current.map { " — \($0.title) · \(timeLabel(player.elapsed)) / \(timeLabel(player.duration))" } ?? ""
         status.button?.toolTip="Hard Play · \(badge.title)\(details)\nClick: player · Right-click: windows"
         status.button?.setAccessibilityLabel("Hard Play — \(badge.title)")
     }
     func windowDidMove(_ notification:Notification) {
+        nanoPlaylist.position()
+        playbackPanel.position()
         if notification.object as? NSWindow === mainWindow {arrangeWorkspaceWindows()}
         if let window=notification.object as? NSWindow { PlaylistWindowState.shared.ownerMoved(window);if window === pocketWindow { window.saveFrame(usingName:"HARDPLAY.pocket");updatePocketEdge() } else if window === miniWindow { window.saveFrame(usingName:"HARDPLAY.stage.minimal.mini") } }
     }
     func windowDidResize(_ notification:Notification) {
+        nanoPlaylist.position()
+        playbackPanel.position()
         if notification.object as? NSWindow === mainWindow {WindowPresentation.shared.requestFit();arrangeWorkspaceWindows()}
         if let window=notification.object as? NSWindow { PlaylistWindowState.shared.ownerMoved(window);if window === pocketWindow {window.saveFrame(usingName:"HARDPLAY.pocket");updatePocketEdge()} }
     }
@@ -1272,22 +1511,117 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if sender === miniWindow,FloatingPlacement.shared.miniLocked {return sender.frame.size}
         return frameSize
     }
-    func windowDidMiniaturize(_ notification:Notification) {defer {WindowPresentation.shared.refresh()}; if let w=notification.object as? NSWindow,(w === mainWindow || w === miniWindow),WindowPresentation.shared.nanoOnMinimize { showPocket() };PlaylistWindowState.shared.syncVisibility();ControlMappings.shared.refreshStates() }
-    func windowDidDeminiaturize(_ notification:Notification) {defer {WindowPresentation.shared.refresh()};PlaylistWindowState.shared.syncVisibility();ControlMappings.shared.refreshStates() }
-    @objc func lockControls() { ControlLock.shared.lock(); showMain() }
+    func windowDidMiniaturize(_ notification:Notification) {
+        defer {WindowPresentation.shared.refresh()}
+        if let window=notification.object as? NSWindow,window === mainWindow || window === miniWindow {
+            hideUtilityWindows()
+            if WindowPresentation.shared.nanoOnMinimize {showPocket()}
+        }
+        PlaylistWindowState.shared.syncVisibility();ControlMappings.shared.refreshStates()
+    }
+    func windowDidDeminiaturize(_ notification:Notification) {
+        if let window=notification.object as? NSWindow {
+            if window === mainWindow {showMain()}
+            else if window === miniWindow {showMini()}
+        }
+        WindowPresentation.shared.refresh();PlaylistWindowState.shared.syncVisibility();ControlMappings.shared.refreshStates()
+    }
+    @objc func lockControls() { ControlLock.shared.lock() }
     func updatePocketEdge() {
         let near=pocketWindow.screen.map { pocketWindow.frame.minX < $0.visibleFrame.minX } ?? false
         if FloatingPlacement.shared.pocketNearLeftEdge != near { FloatingPlacement.shared.pocketNearLeftEdge=near }
+        positionPocketDrawer()
     }
-    func showPocket() { defer {WindowPresentation.shared.refresh()};
+    func togglePocketDrawer() {
+        if PocketDrawerState.shared.open {hidePocketDrawer()}else {nanoPlaylist.hide();showPocketDrawer()}
+    }
+    private func showPocketDrawer() {
+        guard pocketWindow.isVisible else {return}
+        if pocketDrawerWindow == nil {
+            let panel=FloatingPanel(contentRect:NSRect(x:0,y:0,width:PocketDrawerLayout.width,height:PocketDrawerLayout.height),styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+            panel.title="Hard Play Nano Locks";panel.isOpaque=false;panel.backgroundColor = .clear
+            panel.level = .floating;panel.hasShadow=true;panel.hidesOnDeactivate=false
+            panel.isReleasedWhenClosed=false;panel.isMovableByWindowBackground=false
+            panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
+            panel.contentView=NSHostingView(rootView:PocketLocksPanel());pocketDrawerWindow=panel
+        }
+        pocketDrawerRevision+=1;PocketDrawerState.shared.open=true
+        guard let panel=pocketDrawerWindow else {return}
+        positionPocketDrawer()
+        let target=panel.frame
+        panel.setFrame(target.offsetBy(dx:24,dy:0),display:false);panel.alphaValue=0
+        pocketWindow.addChildWindow(panel,ordered:.above);panel.orderFront(nil)
+        NSAnimationContext.runAnimationGroup {context in
+            context.duration=0.18;panel.animator().setFrame(target,display:true);panel.animator().alphaValue=1
+        }
+    }
+    func positionPocketDrawer() {
+        guard !pocketDrawerPositioning,PocketDrawerState.shared.open,let panel=pocketDrawerWindow,
+              let visible=pocketWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {return}
+        pocketDrawerPositioning=true;defer {pocketDrawerPositioning=false}
+        let missing=visible.minX-(pocketWindow.frame.minX+158-PocketDrawerLayout.width-8)
+        if missing>0 {
+            let original=pocketWindow.frame
+            let placed=pocketWindow.constrainFrameRect(original.offsetBy(dx:missing,dy:0),to:pocketWindow.screen)
+            pocketDrawerReturn=(original,placed);pocketWindow.setFrame(placed,display:true)
+        }
+        panel.setFrame(PocketDrawerLayout.frame(owner:pocketWindow.frame,visible:visible),display:true)
+    }
+    func hidePocketDrawer(animated:Bool=true) {
+        guard PocketDrawerState.shared.open else {return}
+        PocketDrawerState.shared.open=false;pocketDrawerRevision+=1
+        let revision=pocketDrawerRevision
+        guard let panel=pocketDrawerWindow else {return}
+        let finish={ [weak self,weak panel] in
+            guard let self,let panel,self.pocketDrawerRevision == revision else {return}
+            panel.orderOut(nil);panel.parent?.removeChildWindow(panel);panel.alphaValue=1
+            if let saved=self.pocketDrawerReturn,self.pocketWindow.frame == saved.placed {self.pocketWindow.setFrame(saved.original,display:true)}
+            self.pocketDrawerReturn=nil
+        }
+        if animated {
+            NSAnimationContext.runAnimationGroup({context in
+                context.duration=0.16;panel.animator().alphaValue=0
+                panel.animator().setFrame(panel.frame.offsetBy(dx:24,dy:0),display:true)
+            },completionHandler:finish)
+        }else {finish()}
+    }
+    func showPocket() { collapsedToMenuBar=false;defer {WindowPresentation.shared.refresh()};
+        preparePlayerWindow(.nano)
         // Preserve the user's position, including when the widget is hidden and restored.
         if !NSScreen.screens.contains(where:{$0.visibleFrame.contains(pocketWindow.frame)}),let screen=NSScreen.main { pocketWindow.setFrame(pocketWindow.constrainFrameRect(pocketWindow.frame,to:screen),display:false) }
         updatePocketEdge();pocketWindow.orderFront(nil)
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard !ControlLock.shared.isLocked else { return false }
-        if sender === mainWindow || sender === miniWindow { sender.orderOut(nil);if WindowPresentation.shared.nanoOnMinimize {showPocket()};WindowPresentation.shared.refresh();return false }
-        return true
+        collapseToMenuBar()
+        return false
+    }
+    func collapseToMenuBar() {
+        guard !ControlLock.shared.isLocked else {return}
+        hoverWork?.cancel();hoverOpened=false;collapsedToMenuBar=true
+        hideUtilityWindows();hidePocketDrawer(animated:false);nanoPlaylist.hide()
+        MenuPreviewPlayer.shared.stop()
+        for window in [mainWindow,miniWindow,pocketWindow,playlistWindow] {window?.orderOut(nil)}
+        popover?.performClose(nil);MenuBarPresentation.shared.setAttached(true)
+        PlaylistWindowState.shared.syncVisibility();WindowPresentation.shared.refresh()
+    }
+    @objc(mouseEntered:) func mouseEntered(with event:NSEvent) {
+        hoverWork?.cancel()
+        guard !popover.isShown else {return}
+        let work=DispatchWorkItem {[weak self] in
+            guard let self,!self.popover.isShown else {return}
+            self.hoverOpened=true;self.presentMenuBarPlayer(focus:false)
+        };hoverWork=work;DispatchQueue.main.asyncAfter(deadline:.now()+0.3,execute:work)
+    }
+    @objc(mouseExited:) func mouseExited(with event:NSEvent) {
+        hoverWork?.cancel()
+        let work=DispatchWorkItem {[weak self] in
+            guard let self,self.hoverOpened else {return}
+            let point=NSEvent.mouseLocation
+            if self.popover.contentViewController?.view.window?.frame.insetBy(dx:-8,dy:-8).contains(point) != true {
+                self.popover.performClose(nil);self.hoverOpened=false
+            }
+        };hoverWork=work;DispatchQueue.main.asyncAfter(deadline:.now()+0.6,execute:work)
     }
     @objc func undoQueueEdit() { Player.shared.undoEdit() }
     @objc func redoQueueEdit() { Player.shared.redoEdit() }
@@ -1306,6 +1640,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sender.reply(toOpenOrPrint:.success)
     }
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool) -> Bool {
+        if collapsedToMenuBar {showMenuBarPlayer();return true}
         if popover.isShown || (miniWindow.isVisible && !miniWindow.isMiniaturized) { return true }
         showMain(); return true
     }
@@ -1327,13 +1662,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 _ = StageTypography.name
 
-if CommandLine.arguments.contains("--style-check") {
+if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.arguments.contains("--render-brand-icon-active") {
+    _ = NSApplication.shared
+    guard let path=CommandLine.arguments.last,path != "--render-brand-icon",
+          let cg=(CommandLine.arguments.contains("--render-brand-icon-active") ? HardPlayBrand.playingIcon:HardPlayBrand.idleIcon).cgImage(forProposedRect:nil,context:nil,hints:nil),
+          let data=NSBitmapImageRep(cgImage:cg).representation(using:.png,properties:[:]) else {fatalError("Unable to render brand icon")}
+    try data.write(to:URL(fileURLWithPath:path))
+    print("Rendered Hard Play icon")
+} else if CommandLine.arguments.contains("--style-check") {
     precondition(StageTypography.name.lowercased().contains("balsamiq"))
+    precondition(StageTheme.named("Mono Console").usesMono && StageTheme.named("Mono Console").flatBackdrop)
+    precondition(StageTheme.named("Signal White").isLight && StageTheme.named("Crew Tape").flatBackdrop)
     precondition(NSFont(name:StageTypography.name,size:14) != nil)
     precondition(NSFont(name:CrewMarker.name,size:18) != nil && CrewMarker.name.contains("PermanentMarker"))
     precondition(HardPlayBrand.artwork != nil)
+    precondition(HardPlayBrand.wordmark != nil)
     for name in ["Tape Blue","Tape White","Tape Black","FOH","Stage Crew","Stagehand"] {let theme=StageTheme.named(name);precondition(theme.preset == name && theme.texture)}
-    print("PASS: bundled marker font registered as \(StageTypography.name), dedicated mini marker font, approved beam artwork and tape/crew presets available")
+    print("PASS: bundled marker font registered as \(StageTypography.name), dedicated mini marker font, Hard Play wordmark artwork and tape/crew presets available")
 } else if CommandLine.arguments.contains("--waveform-test") {
     Task { @MainActor in do {try await runWaveformTests();exit(0)}catch {print("FAIL: \(error.localizedDescription)");exit(1)} };RunLoop.main.run()
 } else if CommandLine.arguments.contains("--viewer-test") {
@@ -1442,7 +1787,7 @@ if CommandLine.arguments.contains("--style-check") {
     verify(buttons.buttons.count==4 && QuickActions(defaults:prefs).buttons==buttons.buttons)
     ControlLock.shared.lock();buttons.remove(id);verify(buttons.buttons.count==4)
     workspace.setDestination(.nearby,for:.themes);verify(workspace.destination(.themes) == .inside)
-    verify(!ControlLock.shared.unlock(heldFor:2.99));_ = ControlLock.shared.unlock(heldFor:3)
+    verify(!ControlLock.shared.unlock(heldFor:1.49));_ = ControlLock.shared.unlock(heldFor:3)
     var ring=CircularUnlockProgress()
     let center=CGPoint.zero
     func point(_ degrees:Double)->CGPoint {CGPoint(x:cos(degrees * .pi/180)*60,y:sin(degrees * .pi/180)*60)}
@@ -1456,7 +1801,7 @@ if CommandLine.arguments.contains("--style-check") {
     verify(ring.degrees==0)
     ring.begin(point(90),center:center);_ = ring.move(point(40),center:center);_ = ring.move(point(70),center:center);verify(abs(ring.degrees-20)<0.001)
     buttons.remove(id);verify(buttons.buttons.count==3)
-    print("PASS: window destination persistence, unknown fallback, quick assignments/modes/limits, protected edits, continuous circular unlock, rejected jumps/straight drags/reverse motion, three-second hold")
+    print("PASS: window destination persistence, unknown fallback, quick assignments/modes/limits, protected edits, continuous circular unlock, rejected jumps/straight drags/reverse motion, 1.5-second hold")
 } else if CommandLine.arguments.contains("--mapping-test") {
     let suite = "local.hardplay.mapping-test.\(UUID().uuidString)"
     let isolated = UserDefaults(suiteName:suite)!
@@ -1526,6 +1871,30 @@ if CommandLine.arguments.contains("--style-check") {
     ControlLock.shared.lock();precondition(!p.copyQueue(to:board));p.removeSelectedQueue();precondition(p.tracks.count==3);_ = ControlLock.shared.unlock(heldFor:3)
     board.clearContents();board.setData(Data("bad".utf8),forType:QueueClipboard.type);p.pasteQueue(from:board);precondition(p.tracks.count==3)
     print("PASS: additive/range/arrow selection, clipboard independent copies with names/fades, atomic cut/delete/duplicate, Undo/Redo, group movement, locks, invalid payload and stable transport")
+} else if CommandLine.arguments.contains("--sort-test") {
+    let suite="local.hardplay.sort.\(UUID().uuidString)"
+    let prefs=UserDefaults(suiteName:suite)!
+    defer {prefs.removePersistentDomain(forName:suite)}
+    let p=Player(defaults:prefs,remoteCommands:false,setupLock:SetupLock(defaults:prefs))
+    let a=Track(url:URL(fileURLWithPath:"/tmp/c.flac"),customTitle:"10 Beta",occurrenceID:UUID().uuidString,addedAt:Date(timeIntervalSince1970:30))
+    let b=Track(url:URL(fileURLWithPath:"/tmp/b.wav"),customTitle:"2 Alpha",occurrenceID:UUID().uuidString,addedAt:Date(timeIntervalSince1970:20))
+    let c=Track(url:URL(fileURLWithPath:"/tmp/a.mp3"),customTitle:"20 Gamma",occurrenceID:UUID().uuidString,addedAt:Date(timeIntervalSince1970:10))
+    p.tracks=[a,b,c];p.currentID=b.id;p.selectedID=c.id;p.elapsed=12
+    p.sortQueue(.number);precondition(p.tracks.map(\.id)==[b.id,a.id,c.id])
+    precondition(p.currentID==b.id && p.selectedID==c.id && p.elapsed==12)
+    p.undoEdit();precondition(p.tracks==[a,b,c]);p.redoEdit();precondition(p.tracks.map(\.id)==[b.id,a.id,c.id])
+    p.sortQueue(.newest);precondition(p.tracks==[a,b,c]);p.sortQueue(.oldest);precondition(p.tracks==[c,b,a])
+    p.sortQueue(.numberDescending);precondition(p.tracks==[c,a,b])
+    p.sortQueue(.filename);precondition(p.tracks==[c,b,a])
+    p.sortQueue(.reverse);precondition(p.tracks==[a,b,c])
+    p.sortQueue(.name);precondition(p.tracks==[b,a,c])
+    p.sortQueue(.nameDescending);precondition(p.tracks==[c,a,b])
+    p.sortQueue(.format);precondition(p.tracks==[a,c,b])
+    p.sortQueue(.random);precondition(Set(p.tracks.map(\.id))==Set([a.id,b.id,c.id]))
+    let restored=Player(defaults:prefs,remoteCommands:false,setupLock:SetupLock(defaults:prefs))
+    precondition(restored.tracks.map(\.addedAt)==p.tracks.map(\.addedAt))
+    ControlLock.shared.lock();let before=p.tracks;p.sortQueue(.reverse);precondition(p.tracks==before);_ = ControlLock.shared.unlock(heldFor:3)
+    print("PASS: all queue sort modes, natural numbers, dates, Undo/Redo, lock protection, persistence and current position preservation")
 } else if CommandLine.arguments.contains("--reorder-test") {
     let suite="local.hardplay.reorder.\(UUID().uuidString)"
     let isolated=UserDefaults(suiteName:suite)!,directory=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -1864,13 +2233,81 @@ if CommandLine.arguments.contains("--style-check") {
     defaults.removePersistentDomain(forName:suite)
     try FileManager.default.removeItem(at:folder)
     print("PASS: select without Play, duplicate identities, independent names/fades, 3s mode, playlist round trip, remove original and restore copies")
+} else if CommandLine.arguments.contains("--audio-routing-test") {
+    let devices=[AudioOutput(id:"usb",name:"USB"),AudioOutput(id:"built-in",name:"Speakers")]
+    precondition(AudioRouting.resolve("",outputs:devices,defaultUID:"usb") == "usb")
+    precondition(AudioRouting.resolve("built-in",outputs:devices,defaultUID:"usb") == "built-in")
+    precondition(AudioRouting.resolve("missing",outputs:devices,defaultUID:"usb") == nil)
+    precondition(AudioRouting.resolve("",outputs:[],defaultUID:nil) == nil)
+    precondition(AudioRouting.previewIsSeparate(main:"usb",preview:"built-in",outputs:devices,defaultUID:"usb"))
+    precondition(!AudioRouting.previewIsSeparate(main:"usb",preview:"usb",outputs:devices,defaultUID:"usb"))
+    precondition(!AudioRouting.previewIsSeparate(main:"usb",preview:"",outputs:devices,defaultUID:"built-in"))
+    precondition(!AudioRouting.previewIsSeparate(main:"usb",preview:"missing",outputs:devices,defaultUID:"usb"))
+    precondition(!AudioRouting.previewIsSeparate(main:"",preview:"built-in",outputs:devices,defaultUID:"built-in"))
+    let suite="hardplay-routing-test-"+UUID().uuidString
+    let defaults=UserDefaults(suiteName:suite)!
+    let routes=AudioRouting(defaults:defaults,monitor:false)
+    routes.mainUID="usb";routes.previewUID="built-in"
+    let restored=AudioRouting(defaults:defaults,monitor:false)
+    precondition(restored.mainUID == "usb" && restored.previewUID == "built-in")
+    defaults.removePersistentDomain(forName:suite)
+    let live=AudioRouting(defaults:UserDefaults(suiteName:suite)!)
+    let decoder=AVPlayer();live.register(decoder,role:.preview)
+    precondition(decoder.audioOutputDeviceUniqueID == nil)
+    precondition(decoder.isMuted == !live.available(.preview))
+    if let first=live.outputs.first {
+        live.previewUID=first.id
+        precondition(decoder.audioOutputDeviceUniqueID == first.id && !decoder.isMuted)
+        let second=AVPlayer();live.register(second,role:.main)
+        precondition(second.audioOutputDeviceUniqueID == nil)
+        if live.outputs.count>1 {
+            live.mainUID=live.outputs[1].id
+            precondition(live.separateOutputs && second.audioOutputDeviceUniqueID == live.outputs[1].id)
+            precondition(decoder.audioOutputDeviceUniqueID == first.id)
+        }
+    }
+    defaults.removePersistentDomain(forName:suite)
+    print("PASS: independent routes, persistence, default resolution, missing output, AVPlayer binding")
+    for device in live.outputs {print("Output: \(device.name)")}
+} else if CommandLine.arguments.contains("--repeat-test") {
+    let suite="hardplay-repeat-test-"+UUID().uuidString
+    let prefs=UserDefaults(suiteName:suite)!
+    let p=Player(defaults:prefs,remoteCommands:false)
+    p.setRepeat(.one);precondition(p.repeatOne && !p.repeatAll && p.endMode == .next)
+    p.setRepeat(.all);precondition(!p.repeatOne && p.repeatAll)
+    p.setRepeat(.off);precondition(!p.repeatOne && !p.repeatAll)
+    p.setRepeat(.one)
+    let restored=Player(defaults:prefs,remoteCommands:false);precondition(restored.repeatMode == .one)
+    let options=SavedPlaylist.Options(startMode:.beginning,endMode:.next,stopBeforeEnd:0,shuffle:false,repeatAll:false,repeatOne:true)
+    let decoded=try JSONDecoder().decode(SavedPlaylist.Options.self,from:JSONEncoder().encode(options));precondition(decoded.repeatOne == true)
+    let legacy=Data(#"{"startMode":"beginning","endMode":"next","stopBeforeEnd":0,"shuffle":false,"repeatAll":true}"#.utf8)
+    let oldOptions=try JSONDecoder().decode(SavedPlaylist.Options.self,from:legacy);precondition(oldOptions.repeatOne == nil)
+    prefs.removePersistentDomain(forName:suite)
+    print("PASS: repeat off/one/all, exclusivity, persistence, playlist compatibility")
 } else if CommandLine.arguments.contains("--self-test") {
+    precondition(AppDelegate.instancesRespond(to:NSSelectorFromString("mouseEntered:")))
+    precondition(AppDelegate.instancesRespond(to:NSSelectorFromString("mouseExited:")))
     let dropped=URL(fileURLWithPath:"/tmp/Set with spaces/Трек.wav")
     precondition(AudioDropURLs.decode(dropped as NSURL) == dropped)
     precondition(AudioDropURLs.decode(dropped.dataRepresentation as NSData) == dropped)
     precondition(AudioDropURLs.decode(dropped.absoluteString as NSString) == dropped)
     precondition(AudioDropURLs.decode("https://example.com/audio.wav") == nil)
-    precondition(PocketPanel.limitedSize(NSSize(width:10,height:10)) == NSSize(width:344,height:320))
+    let drawerScreen=NSRect(x:0,y:0,width:1440,height:900)
+    let playbackOwner=NSRect(x:0,y:50,width:600,height:700)
+    let playbackPlaced=PlaybackPanelLayout.ownerFrame(playbackOwner,visible:drawerScreen)
+    precondition(playbackPlaced.size==playbackOwner.size && playbackPlaced.minX==252)
+    let playbackFrame=PlaybackPanelLayout.panelFrame(owner:playbackPlaced,visible:drawerScreen)
+    precondition(playbackFrame.maxX+8==playbackPlaced.minX && drawerScreen.contains(playbackFrame))
+    precondition(PlaybackPanelLayout.ownerFrame(playbackOwner,visible:NSRect(x:0,y:0,width:600,height:800)).size==playbackOwner.size)
+
+    let drawerOwner=NSRect(x:100,y:100,width:344,height:320)
+    let drawerFrame=PocketDrawerLayout.frame(owner:drawerOwner,visible:drawerScreen)
+    precondition(drawerFrame.maxX == drawerOwner.minX+150 && drawerScreen.contains(drawerFrame))
+    let edgeDrawer=PocketDrawerLayout.frame(owner:NSRect(x:PocketDrawerLayout.width+8-158,y:0,width:344,height:320),visible:drawerScreen)
+    precondition(edgeDrawer.minX==0 && drawerScreen.contains(edgeDrawer))
+    let tinyDrawer=PocketDrawerLayout.frame(owner:drawerOwner,visible:NSRect(x:0,y:0,width:120,height:100))
+    precondition(tinyDrawer.width==120 && tinyDrawer.height==100 && tinyDrawer.minX==0 && tinyDrawer.minY==0)
+    precondition(PocketPanel.limitedSize(NSSize(width:10,height:10)) == NSSize(width:344,height:380))
     precondition(PocketPanel.limitedSize(NSSize(width:900,height:900)) == NSSize(width:560,height:640))
     precondition(PlaylistWindowState.shouldHideSeparate(detached:true,docked:false,visible:true,minimized:false))
     precondition(!PlaylistWindowState.shouldHideSeparate(detached:true,docked:false,visible:true,minimized:true))
@@ -1887,7 +2324,7 @@ if CommandLine.arguments.contains("--style-check") {
     let panelScreen=NSRect(x:0,y:0,width:1200,height:800),panelOld=NSRect(x:100,y:400,width:440,height:300)
     let panelFit=PlaylistPanelLayout.fittedFrame(current:panelOld,visible:panelScreen,minimum:NSSize(width:380,height:450))
     precondition(panelFit.height==450 && panelFit.maxY==panelOld.maxY && panelFit.width==440)
-    precondition(PlaylistPanelLayout.minimumContentHeight(hints:true)>PlaylistPanelLayout.minimumContentHeight(hints:false))
+    precondition(PlaylistPanelLayout.minimumContentHeight(hints:true)==PlaylistPanelLayout.minimumContentHeight(hints:false))
     let smallPanelFit=PlaylistPanelLayout.fittedFrame(current:panelOld,visible:NSRect(x:0,y:0,width:350,height:320),minimum:NSSize(width:380,height:450))
     precondition(smallPanelFit.width==350 && smallPanelFit.height==320 && smallPanelFit.minX==0 && smallPanelFit.minY==0)
     precondition(SeekTime.label(6)=="00:06" && SeekTime.label(60)=="01:00" && SeekTime.label(125)=="02:05" && SeekTime.label(.nan)=="00:00")
@@ -1899,8 +2336,9 @@ if CommandLine.arguments.contains("--style-check") {
     lock.lock(); precondition(lock.isLocked)
     precondition(!lock.unlock(swipe: 30) && lock.isLocked)
     precondition(lock.unlock(swipe: 340) && !lock.isLocked)
-    lock.lock(); precondition(!lock.unlock(heldFor: 0.3))
-    precondition(lock.unlock(heldFor: 3) && !lock.isLocked)
+    lock.lock(); precondition(!lock.unlock(heldFor: 1.49))
+    precondition(lock.unlock(heldFor: 1.5) && !lock.isLocked)
+    precondition(MenuBarBadge.playing.image().isTemplate == false && MenuBarBadge.paused.image().isTemplate)
     precondition(MenuBarBadge.state(hasTrack:false,playing:false,crossfading:false,error:nil) == .empty)
     precondition(MenuBarBadge.state(hasTrack:true,playing:false,crossfading:false,error:nil) == .paused)
     precondition(MenuBarBadge.state(hasTrack:true,playing:true,crossfading:false,error:nil) == .playing)
@@ -1909,6 +2347,7 @@ if CommandLine.arguments.contains("--style-check") {
     print("HARDPLAY self-test passed (model, queue, lock gestures, menu bar states)")
 } else {
     let app = NSApplication.shared
+    app.applicationIconImage=HardPlayBrand.idleIcon
     let delegate = AppDelegate()
     app.delegate = delegate
     app.run()

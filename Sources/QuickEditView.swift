@@ -19,6 +19,10 @@ final class QuickEditModel:ObservableObject {
     @Published var viewport=TimelineViewport(duration:0)
     @Published var wavePeaks:[Double]=[]
     @Published var waveBusy=false
+    @Published var analysingSilence=false
+    @Published var silenceThreshold:Double = -60
+    @Published var edgeSilence:EdgeSilence.Result?
+    private var silenceTask:Task<Void,Never>?
     @Published var waveHeight:Double=160
     @Published var auditioning=false
     @Published var clipSelection=EditorClipSelection()
@@ -33,8 +37,8 @@ final class QuickEditModel:ObservableObject {
     private var lastAuditionTarget:Double?
     private var previewGeneration=0
     var viewportKey:String {"\(viewport.start):\(viewport.length)"}
-    var canEdit:Bool {!busy && !ControlLock.shared.isLocked && !SetupLock.shared.editsBlocked && duration>0}
-    var canPreview:Bool {!busy && !ControlLock.shared.isLocked && !SetupLock.shared.playbackBlocked && !SetupLock.shared.editsBlocked && !mainIsPlaying() && duration>0}
+    var canEdit:Bool {!busy && !analysingSilence && !ControlLock.shared.isLocked && !SetupLock.shared.editsBlocked && duration>0}
+    var canPreview:Bool {!busy && !analysingSilence && !ControlLock.shared.isLocked && !SetupLock.shared.playbackBlocked && !SetupLock.shared.editsBlocked && (!mainIsPlaying() || AudioRouting.shared.separateOutputs) && AudioRouting.shared.available(.preview) && duration>0}
 
     private let preview=AVPlayer()
     @Published var previewVolume:Double=0.8 {didSet {preview.volume=Float(previewVolume)}}
@@ -42,7 +46,7 @@ final class QuickEditModel:ObservableObject {
     private var clock:AnyCancellable?
     private var exportTask:Task<Void,Never>?
     var range:ClipRange {ClipRange(start:start,end:end)}
-    init(_ track:Track,mainIsPlaying:@escaping ()->Bool = {Player.shared.playing}){self.track=track;self.mainIsPlaying=mainIsPlaying}
+    init(_ track:Track,mainIsPlaying:@escaping ()->Bool = {Player.shared.playing}){self.track=track;self.mainIsPlaying=mainIsPlaying;AudioRouting.shared.register(preview,role:.preview)}
     func prepare() async {
         if duration>0 {startClock();return}
         do {
@@ -75,6 +79,7 @@ final class QuickEditModel:ObservableObject {
     }
     private func startPreview(at seconds:Double,audition:Bool) {
         guard canPreview,seconds.isFinite else {return}
+        MenuPreviewPlayer.shared.stop()
         previewGeneration += 1;let generation=previewGeneration
         position=min(duration,max(0,seconds));auditioning=audition;playing=true;preview.volume=Float(previewVolume)
         preview.seek(to:CMTime(seconds:position,preferredTimescale:48000),toleranceBefore:audition ? CMTime(seconds:0.01,preferredTimescale:48000):.zero,toleranceAfter:audition ? CMTime(seconds:0.01,preferredTimescale:48000):.zero) { [weak self] completed in
@@ -122,9 +127,23 @@ final class QuickEditModel:ObservableObject {
         do {let peaks=try await withTaskCancellationHandler(operation:{try await worker.value},onCancel:{worker.cancel()});guard !Task.isCancelled,viewportKey == key else {return};wavePeaks=peaks;waveBusy=false}
         catch {guard viewportKey == key else {return};waveBusy=false;if !(error is CancellationError) {message=error.localizedDescription}}
     }
-    func close(){stopPreview();clock?.cancel();clock=nil;exportTask?.cancel()}
+    func detectSilence() {
+        guard canEdit else {return};stopPreview();edgeSilence=nil;analysingSilence=true
+        let url=track.url,threshold=silenceThreshold
+        silenceTask=Task { @MainActor [weak self] in
+            defer {self?.analysingSilence=false}
+            let worker=Task.detached(priority:.utility) {try EdgeSilence.detect(url,thresholdDB:threshold)}
+            do {let result=try await withTaskCancellationHandler(operation:{try await worker.value},onCancel:{worker.cancel()});guard let self,!Task.isCancelled else {return};self.edgeSilence=result;self.message=result.keep == nil ? "Entire file is below threshold. Nothing will be removed.":result.removable ? "Edge silence found. Select Trimmed Audio, preview, then save a copy or replace this playlist item.":"No edge silence longer than 0.1 seconds found."}
+            catch {if !(error is CancellationError) {self?.message=error.localizedDescription}}
+        }
+    }
+    func selectWithoutSilence() {
+        guard canEdit,let result=edgeSilence,result.removable,let range=result.keep else {return}
+        selectRegion(range.start,range.end);clipSelection.select(range,add:false);fitSelection()
+    }
+    func close(){silenceTask?.cancel();stopPreview();clock?.cancel();clock=nil;exportTask?.cancel()}
     func save(replace:Bool){
-        guard !busy,!SetupLock.shared.editsBlocked,!ControlLock.shared.isLocked,duration>0 else {return}
+        guard !busy,!analysingSilence,!SetupLock.shared.editsBlocked,!ControlLock.shared.isLocked,duration>0 else {return}
         guard commitText(preserveSelection:true),hasSelection else {return}
         if replace,Player.shared.playing,(Player.shared.currentID == track.id || Player.shared.outgoingTrack?.id == track.id) {message="Pause this track before replacing it. Save as Copy is available.";return}
         stopPreview()
@@ -147,6 +166,7 @@ final class QuickEditModel:ObservableObject {
 }
 
 struct QuickEditView:View {
+    @ObservedObject private var routing=AudioRouting.shared
     @ObservedObject var edit:QuickEditModel
     var embedded=false
     @ObservedObject private var player=Player.shared
@@ -158,6 +178,17 @@ struct QuickEditView:View {
             HStack {MarkerLabel("Quick Edit",systemImage:"scissors").font(.stage(.title2).bold());Spacer();Text("TRIM").font(.stage(.caption).bold()).foregroundStyle(accent)}
             Text(edit.track.title).font(.stage(.headline)).lineLimit(2)
             Text("Choose a fragment. Save a copy or replace this playlist item.").font(.stage(.callout)).foregroundStyle(.secondary)
+            VStack(alignment:.leading,spacing:8) {
+                HStack {
+                    Button {edit.detectSilence()} label:{Label(edit.analysingSilence ? "Analysing…":"Detect Edge Silence",systemImage:"waveform.badge.magnifyingglass").font(.stage(size:12)).padding(8)}.buttonStyle(PlayerControlStyle()).disabled(protected || !edit.canEdit)
+                    Text(String(format:"%.0f dB",edit.silenceThreshold)).font(.system(size:11,design:.monospaced))
+                    Slider(value:Binding(get:{edit.silenceThreshold},set:{edit.silenceThreshold=$0.rounded()}),in: -90 ... -20).frame(maxWidth:140).accessibilityLabel("Silence Threshold dB").disabled(edit.analysingSilence || protected)
+                    if edit.analysingSilence {ProgressView().controlSize(.small)}
+                }
+                if let result=edit.edgeSilence,result.removable {
+                    HStack {Text(String(format:"Start %.2f s · End %.2f s",result.leading,result.trailing)).font(.stage(.caption));Spacer();Button("Select Trimmed Audio") {edit.selectWithoutSilence()}.buttonStyle(PlayerControlStyle()).disabled(!edit.canEdit)}
+                }
+            }.onChange(of:edit.silenceThreshold) {_,_ in edit.edgeSilence=nil}
             EditorTimeline(edit:edit).frame(height:edit.waveHeight).background(.white.opacity(0.035),in:RoundedRectangle(cornerRadius:8))
             HStack(spacing:8) {
                 Button {edit.zoom(0.5)} label:{MarkerIcon(systemName:"minus.magnifyingglass")}.accessibilityLabel("Zoom Out Audio")
@@ -184,14 +215,15 @@ struct QuickEditView:View {
                 HStack {Text("In").frame(width:30,alignment:.leading);Slider(value:Binding(get:{edit.start},set:{edit.setStart($0)}),in:0...max(0.001,edit.duration),onEditingChanged:{if !$0 {edit.commitRegion(add:false)}}).accessibilityLabel("Clip In Point")}
                 HStack {Text("Out").frame(width:30,alignment:.leading);Slider(value:Binding(get:{edit.end},set:{edit.setEnd($0)}),in:0...max(0.001,edit.duration),onEditingChanged:{if !$0 {edit.commitRegion(add:false)}}).accessibilityLabel("Clip Out Point")}
             }.disabled(edit.busy || protected || edit.duration<=0).tint(accent)
+            AudioOutputPicker(role:.preview).disabled(protected || setup.settingsBlocked)
             HStack {
-                Button {edit.togglePreview()} label: {MarkerLabel(edit.playing ? "Stop Preview":"Preview Selection",systemImage:edit.playing ? "stop.fill":"play.fill")}.disabled(protected || setup.playbackBlocked || player.playing || edit.duration<=0 || edit.busy)
+                Button {edit.togglePreview()} label: {MarkerLabel(edit.playing ? "Stop Preview":"Preview Selection",systemImage:edit.playing ? "stop.fill":"play.fill")}.disabled(protected || setup.playbackBlocked || (player.playing && !routing.separateOutputs) || !routing.available(.preview) || edit.duration<=0 || edit.busy)
                 Slider(value:Binding(get:{edit.position},set:{edit.seekPreview($0)}),in:0...max(0.001,edit.duration)).accessibilityLabel("Edit Preview Position").disabled(protected || setup.playbackBlocked || edit.duration<=0 || edit.busy)
                 Text(ClipRange.preciseLabel(edit.position)).font(.stage(.caption,design:.monospaced)).frame(width:100)
                 MarkerIcon(systemName:"speaker.wave.1").font(.stage(.caption))
                 Slider(value:$edit.previewVolume,in:0...1).frame(width:60).accessibilityLabel("Preview Volume")
             }
-            if player.playing {Text("Main player is playing. Preview is available after pausing it.").font(.stage(.caption)).foregroundStyle(.secondary)}
+            if player.playing && !routing.separateOutputs {Text("Choose a different Preview Output to audition while Main is playing.").font(.stage(.caption)).foregroundStyle(.secondary)}
             Spacer(minLength:0)
             Text(edit.message).font(.stage(.caption)).textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
             if edit.busy {HStack {ProgressView().controlSize(.small);Button("Cancel Export"){edit.cancelExport()}}}
@@ -199,13 +231,14 @@ struct QuickEditView:View {
                 Button(edit.selectionCount>1 ? "Join & Save Copy…":"Save as Copy…") {edit.save(replace:false)}.buttonStyle(.borderedProminent)
                 Button(edit.selectionCount>1 ? "Join & Replace…":"Replace in Playlist…") {edit.save(replace:true)}.buttonStyle(.bordered)
                 Spacer()
-            }.disabled(edit.busy || protected || !edit.hasSelection)
+            }.disabled(edit.busy || edit.analysingSilence || protected || !edit.hasSelection)
             Text("Original file preserved · WAV 32-bit float · original sample rate & channels").font(.stage(.caption2)).foregroundStyle(.secondary)
         }.padding(22) }.frame(minWidth:620,minHeight:embedded ? 300:650).task {await edit.prepare()}
             .task(id:edit.viewportKey) {await edit.loadWaveform()}
             .onChange(of:lock.isLocked) {_,value in if value {edit.stopPreview()}}
             .onChange(of:setup.playbackBlocked) {_,value in if value {edit.stopPreview()}}
-            .onChange(of:player.playing) {_,value in if value {edit.stopPreview()}}
+            .onChange(of:player.playing) {_,value in if value && !routing.separateOutputs {edit.stopPreview()}}
+            .onChange(of:routing.separateOutputs) {_,separate in if !separate && player.playing {edit.stopPreview()}}
             .onDisappear {if embedded || WorkspaceState.shared.section == .editor {edit.hover(nil);edit.stopPreview()}else {edit.close()}}
     }
 }
