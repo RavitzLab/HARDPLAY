@@ -32,6 +32,8 @@ jobs:
           build/HARDPLAY.app/Contents/MacOS/HARDPLAY --button-mode-test
           build/HARDPLAY.app/Contents/MacOS/HARDPLAY --mapping-test
           build/HARDPLAY.app/Contents/MacOS/HARDPLAY --playlist-test
+          build/HARDPLAY.app/Contents/MacOS/HARDPLAY --media-import-test
+          build/HARDPLAY.app/Contents/MacOS/HARDPLAY --set-sync-test
       - uses: actions/upload-artifact@v4
         with:
           name: HARDPLAY-macOS
