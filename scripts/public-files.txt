@@ -114,3 +114,10 @@ web/tests/history.test.mjs
 web/tests/offline.test.mjs
 web/tests/queue-timing.test.mjs
 web/worker/index.mjs
+Sources/MediaImport.swift
+Sources/MediaImportTests.swift
+Sources/BackupSetSync.swift
+Sources/BackupSyncUI.swift
+Sources/BackupSyncTests.swift
+.github/workflows/release.yml
+docs/RELEASE-0.36.0.md
