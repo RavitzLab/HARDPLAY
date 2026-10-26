@@ -6,7 +6,8 @@ export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache"
 swift build -c release --disable-sandbox --cache-path "$PWD/.build/shared-cache" -debug-info-format none
 APP="$PWD/build/HARDPLAY.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/out/Products/Release/HARDPLAY "$APP/Contents/MacOS/HARDPLAY.new"
+binary_dir=$(swift build -c release --disable-sandbox --cache-path "$PWD/.build/shared-cache" -debug-info-format none --show-bin-path)
+cp "$binary_dir/HARDPLAY" "$APP/Contents/MacOS/HARDPLAY.new"
 mv -f "$APP/Contents/MacOS/HARDPLAY.new" "$APP/Contents/MacOS/HARDPLAY"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
