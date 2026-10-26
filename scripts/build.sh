@@ -18,8 +18,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.hardplay.player</string>
 <key>CFBundleName</key><string>Hard Play</string>
 <key>CFBundleDisplayName</key><string>Hard Play</string>
-<key>CFBundleVersion</key><string>80</string>
-<key>CFBundleShortVersionString</key><string>0.36.0</string>
+<key>CFBundleVersion</key><string>81</string>
+<key>CFBundleShortVersionString</key><string>0.36.1</string>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
 <key>CFBundleLocalizations</key><array><string>en</string></array>
 <key>UTExportedTypeDeclarations</key><array><dict><key>UTTypeIdentifier</key><string>local.hardplay.playlist</string><key>UTTypeDescription</key><string>HARDPLAY Playlist</string><key>UTTypeConformsTo</key><array><string>public.json</string></array><key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>hardplay</string></array><key>public.mime-type</key><string>application/vnd.hardplay.playlist+json</string></dict></dict></array>

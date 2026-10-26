@@ -121,3 +121,6 @@ Sources/BackupSyncUI.swift
 Sources/BackupSyncTests.swift
 .github/workflows/release.yml
 docs/RELEASE-0.36.0.md
+Sources/BackupPlayback.swift
+Sources/BackupPlaybackTests.swift
+docs/RELEASE-0.36.1.md
