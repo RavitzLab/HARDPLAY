@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 final class TrackRowEdit:ObservableObject {
     @Published var controlsOpen=false
@@ -26,6 +27,7 @@ struct QueueTrackRow:View {
     @ViewBuilder private var actions:some View {
         Button("Start at…") {player.requestStartAt(track)}.disabled(editBlocked)
         if player.startPoint(for:track) != nil {Button("Clear start time") {player.clearStartPoint(track)}.disabled(editBlocked)}
+        Button("Show in Finder") {NSWorkspace.shared.activateFileViewerSelecting([track.url])}
         Button("Edit Audio") {AppDelegate.shared.showQuickEdit(track)}.disabled(editBlocked)
         Button("Rename Track") {beginRename()}.disabled(editBlocked)
         Button("Use Filename") {player.rename(track,to:nil)}.disabled(editBlocked || track.customTitle == nil)

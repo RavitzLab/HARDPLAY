@@ -7,9 +7,11 @@ struct BackupSetInput {
     let name:String
     let items:[Item]
     let options:SavedPlaylist.Options
+    var currentIndex:Int? = nil
+    var selectedIndex:Int? = nil
     var signature:String {
-        let rows=items.map { [$0.url.path,$0.title,$0.occurrenceID ?? "",$0.fade.rawValue,String(options.startMode == .resume ? $0.position:0),$0.startPoint.map {"\($0.seconds):\($0.once)"} ?? ""].joined(separator:"\u{0}") }
-        return ([name,options.startMode.rawValue,options.endMode.rawValue,String(options.stopBeforeEnd),String(options.shuffle),String(options.repeatAll)]+rows).joined(separator:"\u{1}")
+        let rows=items.map { [$0.url.path,$0.title,$0.occurrenceID ?? "",$0.fade.rawValue,String($0.position),$0.startPoint.map {"\($0.seconds):\($0.once)"} ?? ""].joined(separator:"\u{0}") }
+        return ([name,options.startMode.rawValue,options.endMode.rawValue,String(options.stopBeforeEnd),String(options.shuffle),String(options.repeatAll),String(options.repeatOne ?? false),String(currentIndex ?? -1),String(selectedIndex ?? -1)]+rows).joined(separator:"\u{1}")
     }
 }
 
@@ -22,6 +24,7 @@ struct BackupManifest:Codable,Equatable {
         let fade:String
         let positionMS:Int64
         var startPoint:TrackStartPoint? = nil
+        var addedAt:Date? = nil
     }
     let version:Int
     let name:String
@@ -31,20 +34,27 @@ struct BackupManifest:Codable,Equatable {
     let stopBeforeMS:Int64
     let shuffle:Bool
     let repeatAll:Bool
+    var repeatOne:Bool? = nil
+    var currentIndex:Int? = nil
+    var selectedIndex:Int? = nil
     var valid:Bool {
         version == 1 && !entries.isEmpty && entries.count <= 10000 && name.utf8.count <= 1000 &&
         ["beginning","resume"].contains(start) && ["next","stop"].contains(end) && (0...30000).contains(stopBeforeMS) &&
-        entries.allSatisfy { $0.title.utf8.count <= 4096 && ($0.startPoint?.valid ?? true) && $0.sha256.count == 64 && $0.sha256.allSatisfy { "0123456789abcdef".contains($0) } && $0.bytes>0 && $0.durationMS>0 && $0.positionMS>=0 && $0.positionMS<=$0.durationMS && FadeMode(rawValue:$0.fade) != nil }
+        (currentIndex.map {entries.indices.contains($0)} ?? true) && (selectedIndex.map {entries.indices.contains($0)} ?? true) &&
+        !(repeatAll && (repeatOne ?? false)) &&
+        entries.allSatisfy { ($0.addedAt?.timeIntervalSince1970.isFinite ?? true) && $0.title.utf8.count <= 4096 && ($0.startPoint?.valid ?? true) && $0.sha256.count == 64 && $0.sha256.allSatisfy { "0123456789abcdef".contains($0) } && $0.bytes>0 && $0.durationMS>0 && $0.positionMS>=0 && $0.positionMS<=$0.durationMS && FadeMode(rawValue:$0.fade) != nil }
     }
     func differences(from other:Self)->[String] {
         guard valid && other.valid else {return ["Invalid or unsupported set manifest"]}
         var result:[String]=[]
+        if name != other.name {result.append("Playlist name differs")}
         if entries.count != other.entries.count {result.append("Track count: \(entries.count) / \(other.entries.count)")}
         if start != other.start {result.append("On Play mode differs")}
         if end != other.end || stopBeforeMS != other.stopBeforeMS {result.append("Auto Stop settings differ")}
-        if shuffle != other.shuffle || repeatAll != other.repeatAll {result.append("Shuffle / Repeat settings differ")}
+        if shuffle != other.shuffle || repeatAll != other.repeatAll || (repeatOne ?? false) != (other.repeatOne ?? false) {result.append("Shuffle / Repeat settings differ")}
         for (i,pair) in zip(entries,other.entries).enumerated() {
             let (a,b)=pair;let prefix=String(format:"Track %02d",i+1)
+            if a.title != b.title {result.append("\(prefix) — title differs")}
             if a.startPoint != b.startPoint {result.append("\(prefix) — start time differs")}
             if a.sha256 != b.sha256 || a.bytes != b.bytes {result.append("\(prefix) — different audio / order")}
             else if a.durationMS != b.durationMS {result.append("\(prefix) — decoded duration differs")}
@@ -85,10 +95,10 @@ struct BackupManifest:Codable,Equatable {
                 reader.cancelReading()
                 audio=Entry(title:item.title,sha256:hash,bytes:size,durationMS:Int64((seconds*1000).rounded()),fade:item.fade.rawValue,positionMS:0);cache[item.url]=audio
             }
-            let position=input.options.startMode == .resume ? min(max(0,item.position),Double(audio.durationMS)/1000):0
-            entries.append(Entry(title:item.title,sha256:audio.sha256,bytes:audio.bytes,durationMS:audio.durationMS,fade:item.fade.rawValue,positionMS:Int64((position*1000).rounded()),startPoint:item.startPoint))
+            let position=min(max(0,item.position),Double(audio.durationMS)/1000)
+            entries.append(Entry(title:item.title,sha256:audio.sha256,bytes:audio.bytes,durationMS:audio.durationMS,fade:item.fade.rawValue,positionMS:Int64((position*1000).rounded()),startPoint:item.startPoint,addedAt:item.addedAt))
         }
-        let result=Self(version:1,name:input.name,entries:entries,start:input.options.startMode.rawValue,end:input.options.endMode.rawValue,stopBeforeMS:Int64((input.options.stopBeforeEnd*1000).rounded()),shuffle:input.options.shuffle,repeatAll:input.options.repeatAll)
+        let result=Self(version:1,name:input.name,entries:entries,start:input.options.startMode.rawValue,end:input.options.endMode.rawValue,stopBeforeMS:Int64((input.options.stopBeforeEnd*1000).rounded()),shuffle:input.options.shuffle,repeatAll:input.options.repeatAll,repeatOne:input.options.repeatOne,currentIndex:input.currentIndex,selectedIndex:input.selectedIndex)
         guard result.valid else {throw BackupFailure("The set contains invalid settings.")};return result
     }
 }
@@ -96,6 +106,6 @@ struct BackupFailure:LocalizedError {let message:String;init(_ message:String){s
 
 extension Player {
     func backupInput()->BackupSetInput {
-        BackupSetInput(name:playlistName,items:tracks.map {.init(url:$0.url,title:$0.title,occurrenceID:$0.occurrenceID,fade:fadeMode(after:$0),position:backupPosition($0),startPoint:$0.startPoint,addedAt:$0.addedAt)},options:.init(startMode:startMode,endMode:endMode,stopBeforeEnd:stopBeforeEnd,shuffle:shuffle,repeatAll:repeatAll))
+        BackupSetInput(name:playlistName,items:tracks.map {.init(url:$0.url,title:$0.title,occurrenceID:$0.occurrenceID,fade:fadeMode(after:$0),position:backupPosition($0),startPoint:$0.startPoint,addedAt:$0.addedAt)},options:.init(startMode:startMode,endMode:endMode,stopBeforeEnd:stopBeforeEnd,shuffle:shuffle,repeatAll:repeatAll,repeatOne:repeatOne),currentIndex:tracks.firstIndex {$0.id == currentID},selectedIndex:tracks.firstIndex {$0.id == selectedID})
     }
 }

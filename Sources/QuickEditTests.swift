@@ -82,7 +82,7 @@ import AVFoundation
     let suite="local.hardplay.clip-test.\(UUID().uuidString)",prefs=UserDefaults(suiteName:suite)!
     defer {prefs.removePersistentDomain(forName:suite)}
     let protection=SetupLock(defaults:prefs),player=Player(defaults:prefs,remoteCommands:false,setupLock:protection)
-    player.add([source]);let track=player.tracks[0];player.setFadeMode(.long,after:track)
+    player.addPrepared([source]);let track=player.tracks[0];player.setFadeMode(.long,after:track)
     let copy=try player.applyEditedClip(track,file:clip,replace:false)
     precondition(player.tracks.count == 2 && copy.id != track.id && player.currentID == track.id && !player.playing && player.fadeMode(after:copy) == .long)
     precondition(MappedAction(rawValue:"track:"+copy.id).valid)

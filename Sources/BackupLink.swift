@@ -6,10 +6,10 @@ import Combine
 
 /// Preparation only. This protocol never executes transport commands or switches audio.
 final class BackupLink:ObservableObject {
-    static let shared=BackupLink()
+    static let shared=BackupLink(defaults:.standard)
     enum Role:String,CaseIterable,Codable {case primary="Primary A",backup="Backup B"}
     struct Peer:Identifiable {let id:String;let endpoint:NWEndpoint;let name:String}
-    struct Packet:Codable {let version:Int;let kind:String;let role:Role;let name:String;let manifest:BackupManifest?}
+    struct Packet:Codable {let version:Int;let kind:String;let role:Role;let name:String;let manifest:BackupManifest?;var sync:BackupSyncMessage? = nil;var capabilities:[String]? = nil}
     @Published private(set) var role:Role = .primary
     @Published private(set) var peers:[Peer]=[]
     @Published private(set) var code=""
@@ -22,6 +22,19 @@ final class BackupLink:ObservableObject {
     @Published private(set) var local:BackupManifest?
     @Published private(set) var remote:BackupManifest?
     @Published private(set) var issues:[String]=[]
+    @Published private(set) var peerSupportsSync=false
+    @Published private(set) var syncing=false
+    @Published private(set) var syncStatus=""
+    @Published private(set) var syncReview:BackupSyncReview?
+    private var syncID:UUID?
+    private var incomingSyncID:UUID?
+    private var syncDirection:BackupSyncDirection?
+    private var syncInventory:BackupSyncInventory?
+    private var remoteInventory:(manifest:BackupManifest,token:UUID)?
+    private var syncTask:Task<Void,Never>?
+    private var incomingSyncTask:Task<Void,Never>?
+    private var syncBaseline:String?
+    private let defaults:UserDefaults?
     private var listener:NWListener?
     private var browser:NWBrowser?
     private var connection:NWConnection?
@@ -49,15 +62,16 @@ final class BackupLink:ObservableObject {
     var verified:Bool {connected && local != nil && remote != nil && issues.isEmpty}
     var summary:String {
         if !connected {return status}
+        if syncing {return syncReview == nil ? "Synchronizing set…":"Review set sync"}
         if scanning {return "Checking set…"}
-        if local == nil || remote == nil {return "Connected · Check both sets"}
-        return issues.isEmpty ? "Sets match · preparation only":"Set mismatch · \(issues.count) issues"
+        if local == nil || remote == nil {return "Connected · Ready to sync set"}
+        return issues.isEmpty ? "Sets match · playback independent":"Set mismatch · \(issues.count) issues"
     }
-    init(name:String=Host.current().localizedName ?? "HARDPLAY Mac",canConfigure:@escaping ()->Bool = { !SetupLock.shared.settingsBlocked && !ControlLock.shared.isLocked }) {self.name=String(name.prefix(100));self.canConfigure=canConfigure}
+    init(name:String=Host.current().localizedName ?? "HARDPLAY Mac",canConfigure:@escaping ()->Bool = { !SetupLock.shared.settingsBlocked && !ControlLock.shared.isLocked },defaults:UserDefaults? = nil) {self.name=String(name.prefix(100));self.canConfigure=canConfigure;self.defaults=defaults;role=Role(rawValue:defaults?.string(forKey:"backupRole") ?? "") ?? .primary}
     func observe(_ player:Player) {
         guard updates == nil else {return};source=player
         updates=player.objectWillChange.throttle(for:.seconds(1),scheduler:RunLoop.main,latest:true).sink { [weak self,weak player] _ in
-            DispatchQueue.main.async {guard let self,let player,let signature=self.signature else {return};if player.backupInput().signature != signature {self.invalidate()}}
+            DispatchQueue.main.async {guard let self,let player else {return};let now=player.backupInput().signature;if let baseline=self.syncBaseline,now != baseline {self.invalidate();return};if let signature=self.signature,now != signature {self.invalidate()}}
         }
     }
     static func normalizedCode(_ value:String)->String {value.uppercased().filter {"ABCDEFGHJKLMNPQRSTUVWXYZ23456789".contains($0)}}
@@ -77,7 +91,7 @@ final class BackupLink:ObservableObject {
         return params
     }
     func host(_ newRole:Role = .primary,advertise:Bool=true)throws {
-        guard canConfigure() else {return};disconnect();role=newRole
+        guard canConfigure() else {return};disconnect();setRole(newRole)
         let alphabet=Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
         let raw=String((0..<12).map {_ in alphabet.randomElement()!})
         code=stride(from:0,to:12,by:4).map {String(Array(raw)[$0..<$0+4])}.joined(separator:"-")
@@ -95,7 +109,7 @@ final class BackupLink:ObservableObject {
         DispatchQueue.main.asyncAfter(deadline:.now()+300) { [weak self] in guard let self,self.epoch == session,!self.connected else {return};self.disconnect();self.status="Pairing expired · create a new code" }
     }
     func browse(_ newRole:Role = .backup) {
-        guard canConfigure() else {return};disconnect();role=newRole;status="Looking for HARDPLAY Macs…"
+        guard canConfigure() else {return};disconnect();setRole(newRole);status="Looking for HARDPLAY Macs…"
         let search=NWBrowser(for:.bonjour(type:"_hardplay-bk._tcp",domain:nil),using:.tcp);browser=search;let session=epoch
         search.browseResultsChangedHandler={ [weak self] results,_ in guard let self,self.epoch == session else {return};self.peers=results.map {result in let label:String;if case .service(let n,_,_,_)=result.endpoint {label=n}else {label=result.endpoint.debugDescription};return Peer(id:result.endpoint.debugDescription,endpoint:result.endpoint,name:label)}.sorted {$0.name<$1.name} }
         search.stateUpdateHandler={ [weak self] state in guard let self,self.epoch == session else {return};if case .failed(let e)=state {self.status="Discovery: \(e.localizedDescription)"};if case .waiting(let e)=state {self.status="Allow Local Network access · \(e.localizedDescription)"} }
@@ -105,7 +119,7 @@ final class BackupLink:ObservableObject {
         guard canConfigure() else {return};let normalized=Self.normalizedCode(entered)
         guard normalized.count == 12 else {status="Enter all 12 characters of the pairing code";return}
         // Stop browsing but retain the chosen role. A new explicit connect replaces old sessions.
-        let selected=newRole ?? role;disconnect();role=selected;status="Connecting securely…"
+        let selected=newRole ?? role;disconnect();setRole(selected);status="Connecting securely…"
         attach(NWConnection(to:endpoint,using:Self.parameters(normalized)),session:epoch)
     }
     private func attach(_ candidate:NWConnection,session:UUID) {
@@ -131,9 +145,9 @@ final class BackupLink:ObservableObject {
         candidate.start(queue:.main)
         DispatchQueue.main.asyncAfter(deadline:.now()+8) { [weak self,weak candidate] in guard let self,let candidate,self.connection === candidate,!self.connected else {return};self.drop("Pairing timed out · check the code and network") }
     }
-    private func send(_ kind:String) {
+    private func send(_ kind:String,manifest:BackupManifest? = nil,sync:BackupSyncMessage? = nil) {
         guard let connection else {return}
-        let packet=Packet(version:1,kind:kind,role:role,name:name,manifest:kind == "manifest" ? local:nil)
+        let packet=Packet(version:1,kind:kind,role:role,name:name,manifest:manifest ?? (kind == "manifest" ? local:nil),sync:sync,capabilities:kind == "hello" ? ["set-sync-v1"]:nil)
         guard let payload=try? JSONEncoder().encode(packet),payload.count<=Self.maxFrame else {return}
         var length=UInt32(payload.count).bigEndian;var frame=withUnsafeBytes(of:&length) {Data($0)};frame.append(payload)
         connection.send(content:frame,completion:.contentProcessed { [weak self,weak connection] error in if let error,let connection {DispatchQueue.main.async {guard let self,self.connection === connection else {return};self.drop("Send failed: \(error.localizedDescription)")}} })
@@ -146,7 +160,11 @@ final class BackupLink:ObservableObject {
             guard size>0,size<=maxFrame else {throw BackupFailure("Invalid backup message length")}
             guard buffer.count>=4+Int(size) else {break}
             let packet=try JSONDecoder().decode(Packet.self,from:Data(buffer.dropFirst(4).prefix(Int(size))))
-            guard packet.version == 1,["hello","heartbeat","manifest","invalidate"].contains(packet.kind),packet.name.utf8.count<=1000,(packet.manifest == nil || (packet.kind == "manifest" && packet.manifest!.valid)) else {throw BackupFailure("Unsupported backup protocol")}
+            guard packet.version == 1,["hello","heartbeat","manifest","invalidate","sync-request","sync-snapshot","sync-apply","sync-result","sync-cancel"].contains(packet.kind),packet.name.utf8.count<=1000,(packet.manifest == nil || (["manifest","sync-snapshot","sync-apply","sync-result"].contains(packet.kind) && packet.manifest!.valid)),
+                  (packet.capabilities?.count ?? 0)<=8,(packet.capabilities?.allSatisfy {$0.utf8.count<=80} ?? true),
+                  (!packet.kind.hasPrefix("sync-") || packet.sync?.valid == true),
+                  (packet.kind != "sync-snapshot" && packet.kind != "sync-apply" || (packet.manifest != nil && packet.sync?.token != nil)),
+                  (packet.kind != "sync-result" || packet.sync?.accepted != nil) else {throw BackupFailure("Unsupported backup protocol")}
             packets.append(packet);buffer=Data(buffer.dropFirst(4+Int(size)))
         }
         guard buffer.count<=maxFrame+4 else {throw BackupFailure("Backup message too large")};return packets
@@ -159,10 +177,11 @@ final class BackupLink:ObservableObject {
                 for packet in try Self.extract(&self.incoming) {
                     guard packet.role != self.role else {throw BackupFailure("Choose opposite roles: Primary A and Backup B")}
                     self.lastReceive=ProcessInfo.processInfo.systemUptime
-                    if packet.kind == "hello" {self.connected=true;self.peerName=packet.name;self.code="";self.status="Connected · TLS";if self.local != nil {self.send("manifest")}}
+                    if packet.kind == "hello" {self.connected=true;self.peerSupportsSync=packet.capabilities?.contains("set-sync-v1") == true;self.peerName=packet.name;self.code="";self.status="Connected · TLS";if self.local != nil {self.send("manifest")}}
                     else {guard self.connected else {throw BackupFailure("Expected peer hello first")}}
                     if packet.kind == "manifest" {self.remote=packet.manifest;self.compare()}
-                    if packet.kind == "invalidate" {self.remote=nil;self.compare()}
+                    if packet.kind == "invalidate" {self.remote=nil;self.compare();self.cancelSync(message:"Other set changed. Synchronize again.")}
+                    if packet.kind.hasPrefix("sync-") {self.handleSync(packet)}
                 }
             } catch {self.drop(error.localizedDescription);return}
             if complete || error != nil {self.drop("Peer disconnected · audio unchanged");return}
@@ -170,7 +189,7 @@ final class BackupLink:ObservableObject {
         }
     }
     private func compare() {issues=(local != nil && remote != nil) ? local!.differences(from:remote!):[]}
-    func invalidate() {fileWatch?.cancel();fileWatch=nil;fileStamp=nil;scanTask?.cancel();scanEpoch=UUID();scanning=false;local=nil;signature=nil;issues=[];progress="Set changed · check again";if connected {send("invalidate")}}
+    func invalidate() {cancelSync(message:"Set changed. Synchronize again.");fileWatch?.cancel();fileWatch=nil;fileStamp=nil;scanTask?.cancel();scanEpoch=UUID();scanning=false;local=nil;signature=nil;issues=[];progress="Set changed · check again";if connected {send("invalidate")}}
     func matches(_ input:BackupSetInput)->Bool {local != nil && signature == input.signature && fileStamp == stamps(input)}
     func check(_ input:BackupSetInput) {
         guard canConfigure() else {return};invalidate();scanning=true;progress="Reading audio…";let checkID=UUID();scanEpoch=checkID
@@ -188,6 +207,116 @@ final class BackupLink:ObservableObject {
             } catch {guard let self,self.scanEpoch == checkID else {return};self.scanning=false;self.progress=error.localizedDescription}
         }
     }
-    private func drop(_ message:String) {connection?.stateUpdateHandler=nil;connection?.cancel();connection=nil;timer?.invalidate();timer=nil;connected=false;remote=nil;incoming.removeAll();issues=[];peerName="";status=message}
+    private func setRole(_ value:Role) {role=value;defaults?.set(value.rawValue,forKey:"backupRole")}
+    var canSync:Bool {connected && peerSupportsSync && !syncing && incomingSyncID == nil && !scanning && canConfigure() && source?.canSynchronizeSet == true}
+    private func publishInventory(_ inventory:BackupSyncInventory) {
+        fileWatch?.cancel();local=inventory.manifest;signature=inventory.input.signature;fileStamp=inventory.stamp
+        let input=inventory.input
+        fileWatch=Timer.publish(every:2,on:.main,in:.common).autoconnect().sink { [weak self] _ in guard let self else {return};if self.stamps(input) != self.fileStamp {self.invalidate()} }
+        compare();if connected {send("manifest")}
+    }
+    private func freshInventory() async throws->BackupSyncInventory {
+        guard let player=source,player.canSynchronizeSet,canConfigure() else {throw BackupFailure("Pause this Mac and unlock setup before syncing.")}
+        let input=player.backupInput(),stamp=stamps(player.backupInput())
+        syncBaseline=input.signature
+        let worker=Task.detached(priority:.utility) {try await BackupManifest.build(input)}
+        let manifest=try await withTaskCancellationHandler(operation:{try await worker.value},onCancel:{worker.cancel()})
+        try Task.checkCancellation()
+        guard player.canSynchronizeSet,player.backupInput().signature == input.signature,stamps(input) == stamp,canConfigure() else {throw BackupFailure("The set changed during scanning. Try again while both Macs are paused.")}
+        return .init(input:input,manifest:manifest,token:UUID(),stamp:stamp)
+    }
+    private func inventoryIsCurrent(_ inventory:BackupSyncInventory)->Bool {
+        canConfigure() && source?.canSynchronizeSet == true && source?.backupInput().signature == inventory.input.signature && stamps(inventory.input) == inventory.stamp
+    }
+    func beginSync(_ direction:BackupSyncDirection) {
+        guard canSync else {syncStatus=peerSupportsSync ? "Pause both Macs and unlock setup before syncing.":"Update Hard Play on both Macs to synchronize sets.";return}
+        let id=UUID();syncID=id;syncDirection=direction;syncing=true;syncReview=nil;syncInventory=nil;remoteInventory=nil
+        syncStatus="Reading the loaded tracks on both Macs…"
+        send("sync-request",sync:.init(id:id,direction:direction))
+        syncTask=Task { @MainActor [weak self] in
+            guard let self else {return}
+            do {let inventory=try await self.freshInventory();guard self.syncID == id else {return};self.syncInventory=inventory;self.publishInventory(inventory);self.prepareSyncReview()}
+            catch {guard self.syncID == id else {return};self.cancelSync(message:error.localizedDescription)}
+        }
+        DispatchQueue.main.asyncAfter(deadline:.now()+300) { [weak self] in guard let self,self.syncID == id else {return};self.cancelSync(message:"Sync expired. No pending changes were applied.") }
+    }
+    private func prepareSyncReview() {
+        guard let id=syncID,let direction=syncDirection,let inventory=syncInventory,let remote=remoteInventory else {return}
+        do {
+            let plan=try BackupSyncPlan.make(source:direction == .send ? inventory.manifest:remote.manifest,destination:direction == .send ? remote.manifest:inventory.manifest)
+            syncReview = .init(id:id,direction:direction,plan:plan,sourceName:direction == .send ? name:peerName,destinationName:direction == .send ? peerName:name)
+            syncStatus=plan.ready ? "Ready · \(plan.source.entries.count) cues matched. Review and apply.":"Missing audio on destination · \(plan.missing.count) cues. Nothing changed."
+        } catch {cancelSync(message:error.localizedDescription)}
+    }
+    func applySync() {
+        guard let review=syncReview,let id=syncID,id == review.id,review.plan.ready,let inventory=syncInventory,inventoryIsCurrent(inventory),let remote=remoteInventory else {cancelSync(message:"The set changed or audio is missing. Scan again.");return}
+        syncReview=nil;syncStatus="Applying set metadata…"
+        send("sync-apply",manifest:review.plan.source,sync:.init(id:id,direction:review.direction,token:remote.token))
+    }
+    func cancelSync(message:String="Sync cancelled. No pending changes applied.",notify:Bool=true) {
+        let active=syncID != nil || incomingSyncID != nil
+        if notify,let id=syncID ?? incomingSyncID,let direction=syncDirection {send("sync-cancel",sync:.init(id:id,direction:direction))}
+        syncTask?.cancel();incomingSyncTask?.cancel();syncTask=nil;incomingSyncTask=nil
+        syncID=nil;incomingSyncID=nil;syncDirection=nil;syncReview=nil;syncInventory=nil;remoteInventory=nil;syncBaseline=nil;syncing=false
+        if active {syncStatus=message}
+    }
+    private func finishSync(_ count:Int) {
+        cancelSync(notify:false);syncStatus="Synchronized · \(count) cues · playback remains paused. Save the received set when ready."
+    }
+    private func handleSync(_ packet:Packet) {
+        guard peerSupportsSync,let message=packet.sync else {return}
+        switch packet.kind {
+        case "sync-request":
+            guard incomingSyncID == nil,syncID == nil,!scanning,canConfigure(),source?.canSynchronizeSet == true else {
+                send("sync-result",sync:.init(id:message.id,direction:message.direction,message:"Other Mac is playing, locked, or busy. Pause it and try again.",accepted:false));return
+            }
+            let id=message.id;incomingSyncID=id;syncDirection=message.direction;syncing=true;syncStatus="Preparing a set sync requested by \(peerName)…"
+            incomingSyncTask=Task { @MainActor [weak self] in
+                guard let self else {return}
+                do {
+                    let inventory=try await self.freshInventory();guard self.incomingSyncID == id else {return}
+                    self.syncInventory=inventory;self.publishInventory(inventory)
+                    self.send("sync-snapshot",manifest:inventory.manifest,sync:.init(id:id,direction:message.direction,token:inventory.token))
+                    self.syncStatus="Tracks matched for review on the other Mac. No changes applied yet."
+                } catch {guard self.incomingSyncID == id else {return};self.send("sync-result",sync:.init(id:id,direction:message.direction,message:error.localizedDescription,accepted:false));self.cancelSync(message:error.localizedDescription,notify:false)}
+            }
+            DispatchQueue.main.asyncAfter(deadline:.now()+300) { [weak self] in guard let self,self.incomingSyncID == id else {return};self.cancelSync(message:"Sync request expired.") }
+        case "sync-snapshot":
+            guard syncID == message.id,syncDirection == message.direction,let manifest=packet.manifest,let token=message.token else {return}
+            remoteInventory=(manifest,token);prepareSyncReview()
+        case "sync-apply":
+            guard incomingSyncID == message.id,syncDirection == message.direction,let inventory=syncInventory,message.token == inventory.token,let manifest=packet.manifest else {return}
+            do {
+                guard inventoryIsCurrent(inventory) else {throw BackupFailure("Other set changed, started playback, or was locked. Nothing applied.")}
+                if message.direction == .send {
+                    let plan=try BackupSyncPlan.make(source:manifest,destination:inventory.manifest)
+                    guard let player=source else {throw BackupFailure("No local player.")}
+                    try player.applySynchronizedSet(plan,inventory:inventory.input)
+                    let updated=BackupSyncInventory(input:player.backupInput(),manifest:manifest,token:UUID(),stamp:stamps(player.backupInput()))
+                    syncBaseline=updated.input.signature;publishInventory(updated);remote=manifest;compare()
+                } else {guard manifest == inventory.manifest else {throw BackupFailure("Source snapshot changed. Synchronize again.")}}
+                send("sync-result",manifest:manifest,sync:.init(id:message.id,direction:message.direction,accepted:true))
+                finishSync(manifest.entries.count)
+            } catch {send("sync-result",sync:.init(id:message.id,direction:message.direction,message:error.localizedDescription,accepted:false));cancelSync(message:error.localizedDescription,notify:false)}
+        case "sync-result":
+            guard syncID == message.id,syncDirection == message.direction else {return}
+            guard message.accepted == true,let manifest=packet.manifest,let inventory=syncInventory else {cancelSync(message:message.message ?? "The other Mac could not apply this set.",notify:false);return}
+            do {
+                guard inventoryIsCurrent(inventory) else {throw BackupFailure("Local set changed. Check both sets before continuing.")}
+                if message.direction == .receive {
+                    guard let player=source,remoteInventory?.manifest == manifest else {throw BackupFailure("Remote snapshot changed.")}
+                    let plan=try BackupSyncPlan.make(source:manifest,destination:inventory.manifest)
+                    try player.applySynchronizedSet(plan,inventory:inventory.input)
+                    let updated=BackupSyncInventory(input:player.backupInput(),manifest:manifest,token:UUID(),stamp:stamps(player.backupInput()))
+                    syncBaseline=updated.input.signature;publishInventory(updated)
+                } else {guard manifest == inventory.manifest else {throw BackupFailure("Received an unexpected sync result.")}}
+                remote=manifest;compare();finishSync(manifest.entries.count)
+            } catch {cancelSync(message:error.localizedDescription)}
+        case "sync-cancel":
+            guard syncID == message.id || incomingSyncID == message.id else {return};cancelSync(message:"Other Mac cancelled or changed its set.",notify:false)
+        default:break
+        }
+    }
+    private func drop(_ message:String) {cancelSync(message:"Connection closed. No pending sync will be applied.",notify:false);peerSupportsSync=false;connection?.stateUpdateHandler=nil;connection?.cancel();connection=nil;timer?.invalidate();timer=nil;connected=false;remote=nil;incoming.removeAll();issues=[];peerName="";status=message}
     func disconnect() {epoch=UUID();drop("Disconnected");listener?.cancel();listener=nil;browser?.cancel();browser=nil;peers=[];code="";listening=false}
 }

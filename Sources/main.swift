@@ -102,7 +102,6 @@ final class Player: ObservableObject {
     private var restoredTime: Double = 0
     private var accessed = Set<URL>()
     private var bookmarks: [String: Data] = [:]
-    private let extensions: Set<String> = ["mp3", "m4a", "aac", "wav", "aif", "aiff", "flac", "alac", "caf", "mp4", "ogg", "opus", "wma", "ape"]
     var current: Track? { tracks.first { $0.id == currentID } }
     var fraction: Double { duration > 0 ? min(elapsed / duration, 1) : 0 }
 
@@ -176,26 +175,32 @@ final class Player: ObservableObject {
         }
     }
     private struct QueueEdit {
-        var tracks:[Track];var modes:[String:FadeMode];var positions:[String:Double];var bookmarks:[String:Data];var selected:String?;var name:String;var url:URL?;var deckRight:Bool;var orderOnly:Bool;var selection:Set<String>
+        var tracks:[Track];var modes:[String:FadeMode];var positions:[String:Double];var bookmarks:[String:Data];var selected:String?;var name:String;var url:URL?;var deckRight:Bool;var orderOnly:Bool;var selection:Set<String>;var options:SavedPlaylist.Options?;var current:String?;var armed:Set<String>
     }
     private var pastEdits:[QueueEdit] = []
     private var futureEdits:[QueueEdit] = []
     var canUndoEdit:Bool { !pastEdits.isEmpty }
     var canRedoEdit:Bool { !futureEdits.isEmpty }
-    private func editSnapshot(orderOnly:Bool=false)->QueueEdit { QueueEdit(tracks:tracks,modes:transitionModes,positions:positions,bookmarks:bookmarks,selected:selectedID,name:playlistName,url:playlistURL,deckRight:activeDeckRight,orderOnly:orderOnly,selection:queueSelection) }
-    private func recordEdit(orderOnly:Bool=false) { pastEdits.append(editSnapshot(orderOnly:orderOnly));if pastEdits.count>30 { pastEdits.removeFirst() };futureEdits=[];objectWillChange.send() }
+    private func editSnapshot(orderOnly:Bool=false,includeOptions:Bool=false)->QueueEdit { QueueEdit(tracks:tracks,modes:transitionModes,positions:positions,bookmarks:bookmarks,selected:selectedID,name:playlistName,url:playlistURL,deckRight:activeDeckRight,orderOnly:orderOnly,selection:queueSelection,options:includeOptions ? SavedPlaylist.Options(startMode:startMode,endMode:endMode,stopBeforeEnd:stopBeforeEnd,shuffle:shuffle,repeatAll:repeatAll,repeatOne:repeatOne):nil,current:currentID,armed:armedStartPoints) }
+    private func recordEdit(orderOnly:Bool=false,includeOptions:Bool=false) { pastEdits.append(editSnapshot(orderOnly:orderOnly,includeOptions:includeOptions));if pastEdits.count>30 { pastEdits.removeFirst() };futureEdits=[];objectWillChange.send() }
     func undoEdit() {
         guard !setupLock.editsBlocked,!ControlLock.shared.isLocked,let edit=pastEdits.popLast() else { return }
-        futureEdits.append(editSnapshot(orderOnly:edit.orderOnly));restoreEdit(edit)
+        futureEdits.append(editSnapshot(orderOnly:edit.orderOnly,includeOptions:edit.options != nil));restoreEdit(edit)
     }
     func redoEdit() {
         guard !setupLock.editsBlocked,!ControlLock.shared.isLocked,let edit=futureEdits.popLast() else { return }
-        pastEdits.append(editSnapshot(orderOnly:edit.orderOnly));restoreEdit(edit)
+        pastEdits.append(editSnapshot(orderOnly:edit.orderOnly,includeOptions:edit.options != nil));restoreEdit(edit)
     }
     private func restoreEdit(_ edit:QueueEdit) {
         if edit.orderOnly {invalidateQueuePreparation()}else {cancelCrossfade()}
         if !edit.tracks.contains(where:{$0.id == currentID}) || edit.tracks.first(where:{$0.id == currentID})?.url != current?.url { pause();loadingTask?.cancel();engine.replaceCurrentItem(with:nil);currentID=nil;elapsed=0;duration=0 }
         playlistURL=edit.url.flatMap {FileManager.default.fileExists(atPath:$0.path) ? $0:nil};playlistName=edit.name;tracks=edit.tracks;transitionModes=edit.modes;positions.merge(edit.positions) { current,_ in current };bookmarks=edit.bookmarks;selectedID=edit.selected;queueSelection=edit.selection
+        if let options=edit.options {
+            startMode=options.startMode;endMode=options.endMode;stopBeforeEnd=options.stopBeforeEnd
+            shuffle=options.shuffle;repeatOne=options.repeatOne ?? false;repeatAll = !repeatOne && options.repeatAll
+            positions=edit.positions;armedStartPoints=edit.armed;activeDeckRight=edit.deckRight
+            if let track=edit.tracks.first(where:{$0.id == edit.current}) {load(track,autoplay:false,position:positions[track.id] ?? 0)}
+        }
         if current == nil {activeDeckRight=edit.deckRight;deckTrackID=nil}
         if current == nil,let first=selectedTrack ?? tracks.first { load(first,autoplay:false,position:positions[first.id] ?? 0) }
         persist();nowPlaying();objectWillChange.send()
@@ -470,25 +475,66 @@ final class Player: ObservableObject {
         d.set(playlistName,forKey:"playlistName")
         d.set(recentPlaylists.map(\.path),forKey:"recentPlaylists")
     }
-    func add(_ urls: [URL]) {
+    func add(_ urls:[URL]) {
+        guard !setupLock.editsBlocked,!ControlLock.shared.isLocked else {return}
+        var files:[URL]=[]
+        for url in urls {
+            if url.startAccessingSecurityScopedResource() {accessed.insert(url)}
+            if (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true {
+                if let iterator=FileManager.default.enumerator(at:url,includingPropertiesForKeys:[.isRegularFileKey],options:[.skipsHiddenFiles,.skipsPackageDescendants]) {
+                    files += iterator.compactMap {$0 as? URL}.filter {MediaImport.accepts($0)}.sorted {$0.path.localizedStandardCompare($1.path) == .orderedAscending}
+                }
+            } else if MediaImport.accepts(url) {files.append(url)}
+        }
+        if files.isEmpty {error="No supported audio or video files were found.";return}
+        MediaImport.shared.enqueue(files)
+    }
+    func addPrepared(_ urls: [URL], importedTitle:String? = nil) {
         guard !setupLock.editsBlocked,!ControlLock.shared.isLocked else { return }
         var files: [URL] = []
         for url in urls {
             if url.startAccessingSecurityScopedResource() { accessed.insert(url) }
             if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                 if let iterator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
-                    files += iterator.compactMap { $0 as? URL }.filter { extensions.contains($0.pathExtension.lowercased()) }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+                    files += iterator.compactMap { $0 as? URL }.filter { MediaImport.accepts($0) }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
                 }
             } else { files.append(url) }
         }
-        if files.contains(where:{ url in extensions.contains(url.pathExtension.lowercased()) && !tracks.contains(where:{$0.url == url})}) { recordEdit() }
-        for url in files where extensions.contains(url.pathExtension.lowercased()) && !tracks.contains(where: { $0.url == url }) {
-            tracks.append(Track(url: url))
+        if files.contains(where:{ url in MediaImport.accepts(url) && !tracks.contains(where:{$0.url == url})}) { recordEdit() }
+        for url in files where MediaImport.accepts(url) && !tracks.contains(where: { $0.url == url }) {
+            tracks.append(Track(url: url, customTitle:importedTitle))
             bookmarks[url.path] = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
         }
         if current == nil, let first = tracks.first { load(first, autoplay: false) }
         if files.isEmpty { error = "No supported audio files were found." }
         persist()
+    }
+    var canSynchronizeSet:Bool {!playing && !isLoading && !isCrossfading && !setupLock.isLocked && !ControlLock.shared.isLocked}
+    /// Apply metadata to locally matched files as one reversible edit. Never writes source audio or the existing playlist document.
+    func applySynchronizedSet(_ plan:BackupSyncPlan,inventory:BackupSetInput)throws {
+        guard !playing,!isLoading,!isCrossfading,!setupLock.isLocked,!ControlLock.shared.isLocked else {throw BackupFailure("Pause this Mac and unlock controls before synchronizing.")}
+        guard plan.ready,inventory.signature == backupInput().signature,plan.localIndices.allSatisfy({$0.map {tracks.indices.contains($0)} ?? false}) else {throw BackupFailure("The local set changed or some audio is missing. Scan again.")}
+        let original=tracks
+        let newTracks=zip(plan.source.entries,plan.localIndices).map {entry,index in
+            Track(url:original[index!].url,customTitle:entry.title,occurrenceID:UUID().uuidString,startPoint:entry.startPoint,addedAt:entry.addedAt)
+        }
+        let newModes=Dictionary(uniqueKeysWithValues:zip(newTracks,plan.source.entries).map {($0.0.id,FadeMode(rawValue:$0.1.fade)!)})
+        let newPositions=Dictionary(uniqueKeysWithValues:zip(newTracks,plan.source.entries).map {($0.0.id,Double($0.1.positionMS)/1000)})
+        var newBookmarks:[String:Data]=[:]
+        for (track,index) in zip(newTracks,plan.localIndices) {newBookmarks[track.id]=bookmarks[original[index!].id] ?? bookmarks[track.url.path] ?? (try? track.url.bookmarkData(options:.withSecurityScope,includingResourceValuesForKeys:nil,relativeTo:nil))}
+        recordEdit(includeOptions:true);restoring=true
+        cancelCrossfade();invalidateQueuePreparation();loadingTask?.cancel();failureObservation=nil;clearEndBoundary()
+        engine.replaceCurrentItem(with:nil);currentID=nil;elapsed=0;duration=0;isLoading=false
+        tracks=newTracks;transitionModes=newModes;positions=newPositions;bookmarks=newBookmarks
+        playlistName=plan.source.name;playlistURL=nil;queueSelection=[]
+        startMode=StartMode(rawValue:plan.source.start)!;endMode=EndMode(rawValue:plan.source.end)!;stopBeforeEnd=Double(plan.source.stopBeforeMS)/1000
+        shuffle=plan.source.shuffle;repeatOne=plan.source.repeatOne ?? false;repeatAll = !repeatOne && plan.source.repeatAll
+        selectedID=plan.source.selectedIndex.flatMap {newTracks.indices.contains($0) ? newTracks[$0].id:nil}
+        armedStartPoints=Set(newTracks.filter {$0.startPoint != nil}.map(\.id))
+        activeDeckRight=false;deckTrackID=nil;stoppedAtBoundary=false;error=nil;restoring=false
+        let index=plan.source.currentIndex ?? 0
+        if newTracks.indices.contains(index) {load(newTracks[index],autoplay:false,position:newPositions[newTracks[index].id] ?? 0)}
+        persist();nowPlaying()
     }
     func rename(_ track: Track, to title: String?) {
         guard !setupLock.editsBlocked, !ControlLock.shared.isLocked,
@@ -628,7 +674,7 @@ final class Player: ObservableObject {
         let panel = NSOpenPanel()
         guard !setupLock.editsBlocked, !ControlLock.shared.isLocked else { NSSound.beep(); return }
         panel.canChooseFiles = true; panel.canChooseDirectories = true; panel.allowsMultipleSelection = true
-        panel.prompt = "Add"; panel.message = "Choose audio files or a music folder"
+        panel.prompt = "Add"; panel.message = "Choose audio, video, or a media folder"
         NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK, !ControlLock.shared.isLocked { add(panel.urls) }
     }
@@ -1090,6 +1136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updateStatusItem()
         registerHotKey()
         _ = ControlMappings.shared
+        BackupLink.shared.observe(Player.shared)
         if CommandLine.arguments.contains("--mini") { toggleMini() } else { showMain() }
         if PlaylistWindowState.shared.detached {WindowPresentation.shared.autoFit=true}
         if let edge=PlaylistWindowState.shared.edge,PlaylistWindowState.shared.detached { PlaylistWindowState.shared.dock(edge) } else if PlaylistWindowState.shared.detached { showPlaylistWindow() }
@@ -1721,6 +1768,10 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
     precondition(HardPlayBrand.wordmark != nil)
     for name in ["Tape Blue","Tape White","Tape Black","FOH","Stage Crew","Stagehand"] {let theme=StageTheme.named(name);precondition(theme.preset == name && theme.texture)}
     print("PASS: bundled marker font registered as \(StageTypography.name), dedicated mini marker font, Hard Play wordmark artwork and tape/crew presets available")
+ } else if CommandLine.arguments.contains("--set-sync-test") {
+    Task { @MainActor in do {try await runSetSyncTests();exit(0)} catch {print("FAIL: \(error as NSError)");exit(1)} };RunLoop.main.run()
+} else if CommandLine.arguments.contains("--media-import-test") {
+    Task { @MainActor in do {try await runMediaImportTests();exit(0)} catch {print("FAIL: \(error as NSError)");exit(1)} };RunLoop.main.run()
 } else if CommandLine.arguments.contains("--waveform-test") {
     Task { @MainActor in do {try await runWaveformTests();exit(0)}catch {print("FAIL: \(error.localizedDescription)");exit(1)} };RunLoop.main.run()
 } else if CommandLine.arguments.contains("--viewer-test") {
@@ -1770,7 +1821,7 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
     p.volume = 0.65; precondition(c.isOn(action("mute")) == false)
     c.trigger(action("stopAtEnd"),behavior:.toggle); precondition(p.endMode == .stop)
     c.trigger(action("stopAtEnd"),behavior:.toggle); precondition(p.endMode == .next)
-    p.add([URL(fileURLWithPath:"/tmp/hardplay-mode-\(UUID().uuidString).wav")])
+    p.addPrepared([URL(fileURLWithPath:"/tmp/hardplay-mode-\(UUID().uuidString).wav")])
     c.trigger(action("fadeShort"),behavior:.trigger); c.trigger(action("fadeShort"),behavior:.trigger)
     precondition(p.fadeMode(after:p.tracks[0]) == .short)
     c.trigger(action("fadeShort"),behavior:.toggle); precondition(p.fadeMode(after:p.tracks[0]) == .none)
@@ -1965,7 +2016,7 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
     let protection=SetupLock(defaults:isolated),player=Player(defaults:isolated,remoteCommands:false,setupLock:protection)
     let audio=directory.appendingPathComponent("source.wav"),document=directory.appendingPathComponent("first.hardplay"),trashed=directory.appendingPathComponent("trashed.hardplay")
     let bytes=Data("fixture source remains untouched".utf8);try bytes.write(to:audio)
-    player.add([audio]);player.renameSet(to:"First");player.setFadeMode(.long,after:player.tracks[0]);try player.writePlaylist(to:document)
+    player.addPrepared([audio]);player.renameSet(to:"First");player.setFadeMode(.long,after:player.tracks[0]);try player.writePlaylist(to:document)
     let ids=player.tracks.map(\.id),original=try Data(contentsOf:document)
     player.newPlaylist(named:"  Second\nSet  ")
     precondition(player.tracks.isEmpty && player.playlistURL==nil && player.playlistName=="Second Set" && !player.playing && player.canDeletePlaylist)
@@ -1991,7 +2042,7 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
     let first = directory.appendingPathComponent("a.wav"), second = directory.appendingPathComponent("b.wav")
     // Missing audio references are intentional: playlist I/O must preserve them without playback.
     let player = Player(defaults:prefs,remoteCommands:false)
-    player.add([first,second]); player.setFadeMode(.short,after:player.tracks[0]); player.setFadeMode(.long,after:player.tracks[1])
+    player.addPrepared([first,second]); player.setFadeMode(.short,after:player.tracks[0]); player.setFadeMode(.long,after:player.tracks[1])
     player.startMode = .resume; player.endMode = .stop; player.stopBeforeEnd = 3
     player.rename(player.tracks[0],to:"  Opening — Live  ")
     precondition(player.tracks[0].title == "Opening — Live" && player.tracks[0].url == first)
@@ -2046,7 +2097,7 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
             let testLock = SetupLock(defaults: defaults)
             let player = Player(defaults: defaults, remoteCommands: false, setupLock: testLock)
             player.volume = 0
-            player.add([URL(fileURLWithPath: CommandLine.arguments[testIndex + 1]), URL(fileURLWithPath: CommandLine.arguments[testIndex + 2])])
+            player.addPrepared([URL(fileURLWithPath: CommandLine.arguments[testIndex + 1]), URL(fileURLWithPath: CommandLine.arguments[testIndex + 2])])
             try await waitUntil { player.duration > 0 }
             let first = player.tracks[0], second = player.tracks[1]
             let buttonControls = ControlMappings(defaults:defaults,liveIO:false,player:player,setupLock:testLock)
@@ -2183,7 +2234,7 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
             try Data().write(to: emptyURL)
             defer { try? FileManager.default.removeItem(at: emptyURL) }
             let emptyTrack = Track(url: emptyURL)
-            player.add([emptyURL]); player.load(emptyTrack)
+            player.addPrepared([emptyURL]); player.load(emptyTrack)
             precondition(!player.playing && player.duration == 0 && player.error?.contains("0 bytes") == true)
             player.toggle()
             precondition(!player.playing && player.currentID == emptyTrack.id && player.error?.contains("0 bytes") == true)
@@ -2196,7 +2247,7 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
             let protectedID = player.currentID, protectedTime = player.elapsed
             let protectedTracks = player.tracks, protectedModes = player.transitionModes
             testLock.protectEdits = true; testLock.protectSelection = true; testLock.protectPlayback = true; testLock.lock()
-            player.rename(first,to:"Blocked rename"); player.remove(first); player.add([first.url]); player.setFadeModeForAll(.long); player.setFadeMode(.long,after:first)
+            player.rename(first,to:"Blocked rename"); player.remove(first); player.addPrepared([first.url]); player.setFadeModeForAll(.long); player.setFadeMode(.long,after:first)
             player.toggle(); player.next(); player.previous(); player.play(second); player.restart(); player.resumeSaved(); player.seek(4)
             precondition(player.currentID == protectedID && player.elapsed == protectedTime && !player.playing)
             precondition(player.tracks == protectedTracks && player.transitionModes == protectedModes)

@@ -504,6 +504,7 @@ struct PlayerView: View {
             }
             Spacer(minLength:4)
             Spacer(minLength:4)
+            if !compact {BackupConnectionButton()}
             Button {AppDelegate.shared.toggleSettingsWindow()} label:{
                 if compact {MarkerIcon(systemName:"slider.horizontal.3",size:18).frame(width:32,height:32)}
                 else {MarkerLabel("PATCH",systemImage:"slider.horizontal.3").font(.stage(size:12)).padding(.horizontal,9).frame(height:32).fixedSize(horizontal:true,vertical:false)}
