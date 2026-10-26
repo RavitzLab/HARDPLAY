@@ -16,7 +16,7 @@
 
 The app is ad-hoc signed and **not notarized by Apple**. If macOS blocks its first launch, verify the source and use the normal **System Settings → Privacy & Security → Open Anyway** flow. Do not disable Gatekeeper. Local playback does not need an internet connection. Supported codecs depend on macOS; the app does not promise every audio format.
 
-**Versions:** current source is **0.36.1**. Installers are published separately under Releases; check the version before downloading. Source changes do not deploy the web edition.
+**Versions:** current source is **0.36.2**. Installers are published separately under Releases; check the version before downloading. Source changes do not deploy the web edition.
 
 ## What you can do
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.36.2
+
+- Normal app exit disconnects the pair before pausing the local player, so quitting either Mac leaves its peer playing.
+- Internal pauses during local lifecycle operations are not forwarded as user transport requests. Explicit Play/Pause buttons and MIDI toggles still control the pair.
+- Added real TLS/AVPlayer regression checks for exiting Primary A and Backup B.
+
 ## 0.36.1
 
 - Added explicitly armed Linked Playback: Play/Pause, Next/Previous and seeks from either Mac control the pair; Primary A drives state and Shuffle choices.
