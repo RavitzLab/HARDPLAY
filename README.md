@@ -16,7 +16,7 @@
 
 The app is ad-hoc signed and **not notarized by Apple**. If macOS blocks its first launch, verify the source and use the normal **System Settings → Privacy & Security → Open Anyway** flow. Do not disable Gatekeeper. Local playback does not need an internet connection. Supported codecs depend on macOS; the app does not promise every audio format.
 
-**Versions:** current source is **0.35.5**. The latest downloadable package at this documentation update is **0.35.2**; its interface may differ. Source changes do not automatically replace a published installer or deploy the web edition.
+**Versions:** current source is **0.36.0**. Installers are published separately under Releases; check the version before downloading. Source changes do not deploy the web edition.
 
 ## What you can do
 
@@ -24,7 +24,8 @@ The app is ad-hoc signed and **not notarized by Apple**. If macOS blocks its fir
 | --- | --- |
 | Playback | Previous, Play/Pause, Next, master volume, Next/Auto Stop, Repeat One/All/Off and Shuffle. |
 | Transitions | Crossfade duration from **0 to 30 seconds**, in 0.1-second steps. Default for an unconfigured transition: **2 seconds**. Apply to the current transition or the entire playlist. |
-| Queue | Add/drop files, reorder by the handle, duplicate, rename, sort, remove and save named sets. Removing an entry does not delete its source audio. |
+| Media import | Drop audio or video. Extract the first audio stream using Auto, AAC or WAV; originals stay unchanged. Optional locally installed FFmpeg provides extra codec decoding. See the user guide for limits. |
+| Queue | Show in Finder from track actions; add/drop files, reorder by the handle, duplicate, rename, sort, remove and save named sets. Removing an entry does not delete its source audio. |
 | Waveforms | Hover to inspect time. Unlock the small seek padlock for one seek gesture; it relocks on release or after an unused unlock expires. NEXT is a preview of the queued track; use **Start at…** in its playlist actions to set a start point. |
 | Editing | Quick Edit offers waveform zoom, in/out points, split, multiple selected regions, joining and edge-silence detection. Save a new WAV as a copy or replace the queue entry; the original file stays unchanged. |
 | Audio | Independent Main and Preview output selection. Concurrent audition requires separate, available outputs. |
@@ -38,7 +39,7 @@ The app is ad-hoc signed and **not notarized by Apple**. If macOS blocks its fir
 
 - **Quick Edit:** [editing guide](docs/QUICK-EDIT.ru.md). It edits regions from one source file; it is not a multitrack DAW.
 - **Web Viewer:** [local read-only playlist display](docs/WEB-VIEWER.ru.md). It does not stream audio or offer remote transport control.
-- **Backup preparation:** [set verification and transfer](docs/BACKUP-SETUP.ru.md). Set matching is not synchronized audio, automatic failover or hardware timecode output. [Future stage plan](docs/TIMECODE-BACKUP-PLAN.ru.md).
+- **Backup set sync:** [connect two Macs and choose the source](docs/BACKUP-SETUP.ru.md). Push or pull playlist metadata, matching locally loaded files by SHA-256. Review before applying; Undo restores the destination. The A/B indicator next to PATCH shows connection and set matching. Playback clocks, automatic failover and hardware timecode are not implemented. [Future stage plan](docs/TIMECODE-BACKUP-PLAN.ru.md).
 - **Offline web player:** a separate edition in [`web/`](web/README.md). Its features and browser storage differ from the Mac app. It does not automatically share the native audio library.
 
 Hardware MIDI, physical audio routing, cross-computer operation and live PA use need testing with the intended equipment. See [validation status](VALIDATION.md).
@@ -63,6 +64,7 @@ build/HARDPLAY.app/Contents/MacOS/HARDPLAY --playlist-test
 build/HARDPLAY.app/Contents/MacOS/HARDPLAY --clip-test
 build/HARDPLAY.app/Contents/MacOS/HARDPLAY --waveform-test
 build/HARDPLAY.app/Contents/MacOS/HARDPLAY --backup-test
+build/HARDPLAY.app/Contents/MacOS/HARDPLAY --set-sync-test
 
 # Create DMG, ZIP and SHA-256 files in build/release/
 zsh scripts/release.sh
@@ -80,3 +82,5 @@ Audio and network checks can require macOS permissions and an unrestricted local
 - `.github/workflows/` — CI verification.
 
 Build output, caches, personal sets, audio, credentials, hosting identities and unused design drafts are excluded. See [repository hygiene](docs/REPOSITORY.md). Font license notices are retained in `assets/fonts/` and `web/public/font-license.txt`. No general open-source license is currently granted for the application code; public source visibility alone does not grant redistribution rights.
+
+Release maintainers: a main-branch commit containing `[release]` (or a manual **Publish Mac Release** run) builds and tests the current version, then publishes its DMG, ZIP and checksums using `docs/RELEASE-<version>.md`. Existing releases are never overwritten.

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.36.0
+
+- One-button push/pull set synchronization between paired Macs, with direction selection and review before applying.
+- Match already loaded local files by SHA-256; transfer order, cue names, duplicates, fades, start points, saved positions and playback options without copying audio.
+- Missing media, stale snapshots, playback, locks and disconnects prevent pending changes; received sets remain paused and support Undo/Redo.
+- Primary A / Backup B connection and set-status button beside PATCH in Main; hardware timecode and automatic failover remain inactive.
+- Show in Finder in track context menus, including the Nano playlist.
+
+## 0.35.6
+
+- Shared audio/video import queue, extraction to Auto/M4A, AAC or WAV, progress and cancellation.
+- Optional local FFmpeg fallback to 24-bit PCM WAV for extra codecs; no bundled FFmpeg or network conversion.
+- Original files remain unchanged; imported copies persist independently of the video.
+
+
 Source versions after 0.35.2 are not automatically available as downloadable installers. Check Releases for package availability.
 
 ## 0.35.5
