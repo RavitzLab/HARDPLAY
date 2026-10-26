@@ -62,6 +62,7 @@ final class WorkspaceState:ObservableObject {
         guard !ControlLock.shared.isLocked else {return true}
         if target == .editor {guard !SetupLock.shared.editsBlocked else {return true}}
         else if target != .settings {guard !SetupLock.shared.settingsBlocked else {return true}}
+        AppDelegate.shared?.rememberUtilityOwner()
         let placement=forced ?? resolved(target)
         if placement == .ask {
             guard !asking,let app=AppDelegate.shared,let window=app.mainWindow else {return true}
@@ -169,4 +170,28 @@ extension View {
             }
         }
     }
+}
+
+/// Content-owned navigation stays below the native title bar at every window size.
+struct UtilityNavigationView<Content:View>:View {
+    let content:Content
+    @ObservedObject private var appearance=AppearancePreferences.shared
+    var body:some View {
+        VStack(spacing:0) {
+            HStack {
+                Button {AppDelegate.shared.returnToPlayer()} label: {
+                    HStack(spacing:8) {
+                        MarkerIcon(systemName:"arrow.left")
+                        Text("Back to Player").font(.stage(size:14))
+                    }.padding(.horizontal,12).frame(minHeight:34)
+                }.buttonStyle(PlayerControlStyle()).accessibilityLabel("Back to Player")
+                Spacer(minLength:0)
+            }.padding(.horizontal,20).padding(.vertical,12)
+            Divider()
+            content.frame(maxWidth:.infinity,maxHeight:.infinity)
+        }.background(ThemedBackdrop()).foregroundStyle(Color(stageHex:appearance.theme.text))
+    }
+}
+extension View {
+    func utilityNavigation()->some View {UtilityNavigationView(content:self)}
 }
