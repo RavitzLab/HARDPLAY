@@ -18,7 +18,11 @@ struct StageTheme: Codable {
     var texture = true
     var isLight:Bool {
         let rgb = UInt64(background, radix:16) ?? 0x20252D
-        return (Double((rgb >> 16) & 255) * 0.2126 + Double((rgb >> 8) & 255) * 0.7152 + Double(rgb & 255) * 0.0722) > 160
+        let red = Double((rgb >> 16) & 255)
+        let green = Double((rgb >> 8) & 255)
+        let blue = Double(rgb & 255)
+        let luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722
+        return luminance > 160
     }
     var usesMono:Bool {preset == "Mono Console" || preset == "Signal White"}
     var flatBackdrop:Bool {["Mono Console","Crew Tape","Signal White"].contains(preset)}
