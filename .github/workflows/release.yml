@@ -39,6 +39,7 @@ jobs:
           build/HARDPLAY.app/Contents/MacOS/HARDPLAY --backup-test
           build/HARDPLAY.app/Contents/MacOS/HARDPLAY --backup-link-test
           build/HARDPLAY.app/Contents/MacOS/HARDPLAY --set-sync-test
+          build/HARDPLAY.app/Contents/MacOS/HARDPLAY --linked-playback-test
       - name: Publish checked installers
         env:
           GH_TOKEN: ${{ github.token }}
