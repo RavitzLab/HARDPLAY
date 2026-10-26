@@ -75,7 +75,20 @@ private func linkedWave(_ marker:UInt16)->Data {
     a.toggle();try await wait("playing before disconnect") {a.playing && b.playing}
     lb.disconnect();try await wait("disconnect disables") {!la.connected && !la.linkedPlayback && !lb.linkedPlayback}
     precondition(a.playing && b.playing && !b.linkedFollower)
+    // Normal exit must sever the link before pausing the local engine.
+    func rearm() async throws {
+        a.pause();b.pause();try la.host(.primary,advertise:false);try await wait("exit-test listener") {la.port != nil}
+        lb.connect(.hostPort(host:"127.0.0.1",port:la.port!),code:la.code,role:.backup)
+        try await wait("exit-test pair") {la.connected && lb.connected}
+        try await Task.sleep(for:.seconds(1.2))
+        la.beginSync(.send);try await wait("exit-test review") {la.syncReview?.plan.ready == true};la.applySync()
+        try await wait("exit-test sync") {la.canEnablePlayback && lb.canEnablePlayback}
+        la.setPlaybackLinked(true);lb.setPlaybackLinked(true);try await wait("exit-test armed") {la.linkedPlayback && lb.linkedPlayback}
+        a.toggle();try await wait("exit-test playing") {a.playing && b.playing}
+    }
+    try await rearm();lb.shutdownPlayer();try await wait("Backup exit") {!la.connected && !b.playing};precondition(a.playing)
+    try await rearm();la.shutdownPlayer();try await wait("Primary exit") {!lb.connected && !a.playing};precondition(b.playing && !lb.linkedPlayback)
     precondition(!BackupPlayAction(kind:"seek",seconds:.infinity).valid && !BackupPlayAction(kind:"play",index:-1).valid)
     precondition(!BackupPlayState(index:0,seconds:-1,playing:true,crossfading:false).valid)
-    print("PASS: real muted AVPlayer/TLS linked Play/Pause from either Mac, seek, Next/Previous, authoritative automatic Shuffle, explicit two-sided arming, locks, no transport on set-sync alone, drift under 750ms on localhost, disconnect preserves local audio; no hardware timecode claim")
+    print("PASS: real muted AVPlayer/TLS linked Play/Pause from either Mac, seek, Next/Previous, authoritative automatic Shuffle, explicit two-sided arming, locks, no transport on set-sync alone, drift under 750ms on localhost, disconnect preserves local audio; normal exit of either Mac leaves the peer playing; no hardware timecode claim")
 }

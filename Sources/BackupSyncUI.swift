@@ -55,7 +55,7 @@ struct BackupLinkedPlaybackControls:View {
             Text(link.playbackStatus).font(.stage(.callout)).foregroundStyle(link.linkedPlayback ? .green:accent).fixedSize(horizontal:false,vertical:true)
             Text("Enable on both Macs while paused, after synchronizing the set. Primary A drives playback; buttons on either Mac control the pair. Seek, track changes, Repeat and Shuffle follow A. Each Mac keeps its own audio output and volume.")
                 .font(.stage(.caption)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
-            if !link.peerSupportsPlayback {Text("Both Macs need Hard Play 0.36.1 or newer.").font(.stage(.caption)).foregroundStyle(.orange)}
+            if !link.peerSupportsPlayback {Text("Both Macs need Hard Play 0.36.2 or newer.").font(.stage(.caption)).foregroundStyle(.orange)}
             else if !link.verified {Text("Synchronize or check both sets first.").font(.stage(.caption)).foregroundStyle(.secondary)}
             Text("Linked control over LAN, not sample-accurate timecode. A disconnect disables the link; local playback continues. Reconnect and enable the link again manually.")
                 .font(.stage(.caption)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)

@@ -343,7 +343,7 @@ final class Player: ObservableObject {
     }
     func playFromQueue(_ track:Track) {
         guard !setupLock.selectionBlocked,!setupLock.playbackBlocked,!ControlLock.shared.isLocked else { return }
-        if currentID == track.id && playing { pause() } else { play(track) }
+        if currentID == track.id && playing { toggle() } else { play(track) }
     }
     @discardableResult func duplicate(_ track:Track) -> Track? {
         guard !setupLock.editsBlocked,!ControlLock.shared.isLocked,let index=tracks.firstIndex(where:{$0.id == track.id}) else { return nil }
@@ -819,7 +819,6 @@ final class Player: ObservableObject {
         positions[id] = elapsed
     }
     func pause() {
-        if !applyingLinkedState,linkedAction?(.init(kind:"pause")) == true {return}
         engine.pause(); outgoing?.pause(); playing = false; rememberPosition(); nowPlaying(); persist()
     }
     func restart() {
@@ -1773,7 +1772,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showMain(); return true
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationWillTerminate(_ notification: Notification) { Player.shared.pause(); if let hotKey { UnregisterEventHotKey(hotKey) } }
+    func applicationWillTerminate(_ notification: Notification) { BackupLink.shared.shutdownPlayer(); if let hotKey { UnregisterEventHotKey(hotKey) } }
     func registerHotKey() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in

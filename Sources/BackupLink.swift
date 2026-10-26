@@ -166,7 +166,7 @@ final class BackupLink:ObservableObject {
     }
     private func send(_ kind:String,manifest:BackupManifest? = nil,sync:BackupSyncMessage? = nil,playback:BackupPlayMessage? = nil) {
         guard let connection else {return}
-        let packet=Packet(version:1,kind:kind,role:role,name:name,manifest:manifest ?? (kind == "manifest" ? local:nil),sync:sync,capabilities:kind == "hello" ? ["set-sync-v1","linked-playback-v1"]:nil,playback:playback)
+        let packet=Packet(version:1,kind:kind,role:role,name:name,manifest:manifest ?? (kind == "manifest" ? local:nil),sync:sync,capabilities:kind == "hello" ? ["set-sync-v1","linked-playback-v2"]:nil,playback:playback)
         guard let payload=try? JSONEncoder().encode(packet),payload.count<=Self.maxFrame else {return}
         var length=UInt32(payload.count).bigEndian;var frame=withUnsafeBytes(of:&length) {Data($0)};frame.append(payload)
         connection.send(content:frame,completion:.contentProcessed { [weak self,weak connection] error in if let error,let connection {DispatchQueue.main.async {guard let self,self.connection === connection else {return};self.drop("Send failed: \(error.localizedDescription)")}} })
@@ -200,7 +200,7 @@ final class BackupLink:ObservableObject {
                 for packet in try Self.extract(&self.incoming) {
                     guard packet.role != self.role else {throw BackupFailure("Choose opposite roles: Primary A and Backup B")}
                     self.lastReceive=ProcessInfo.processInfo.systemUptime
-                    if packet.kind == "hello" {self.connected=true;self.peerSupportsSync=packet.capabilities?.contains("set-sync-v1") == true;self.peerSupportsPlayback=packet.capabilities?.contains("linked-playback-v1") == true;self.peerName=packet.name;self.code="";self.status="Connected · TLS";if self.local != nil {self.send("manifest")}}
+                    if packet.kind == "hello" {self.connected=true;self.peerSupportsSync=packet.capabilities?.contains("set-sync-v1") == true;self.peerSupportsPlayback=packet.capabilities?.contains("linked-playback-v2") == true;self.peerName=packet.name;self.code="";self.status="Connected · TLS";if self.local != nil {self.send("manifest")}}
                     else {guard self.connected else {throw BackupFailure("Expected peer hello first")}}
                     if packet.kind == "manifest" {self.remote=packet.manifest;self.compare()}
                     if packet.kind == "invalidate" {self.disablePlayback("Other set changed. Synchronize and enable Linked Playback again.",notify:false);self.remote=nil;self.compare();self.cancelSync(message:"Other set changed. Synchronize again.")}
@@ -418,5 +418,6 @@ final class BackupLink:ObservableObject {
         }
     }
     private func drop(_ message:String) {disablePlayback("Link lost · local audio continues independently.",notify:false);peerSupportsPlayback=false;cancelSync(message:"Connection closed. No pending sync will be applied.",notify:false);peerSupportsSync=false;connection?.stateUpdateHandler=nil;connection?.cancel();connection=nil;timer?.invalidate();timer=nil;connected=false;remote=nil;incoming.removeAll();issues=[];peerName="";status=message}
+    func shutdownPlayer() {disconnect();source?.pause()}
     func disconnect() {epoch=UUID();drop("Disconnected");listener?.cancel();listener=nil;browser?.cancel();browser=nil;peers=[];code="";listening=false}
 }

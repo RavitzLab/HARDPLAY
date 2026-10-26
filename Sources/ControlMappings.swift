@@ -219,7 +219,7 @@ final class ControlMappings: ObservableObject {
         case "hints":if !setupLock.settingsBlocked {HintPreferences.shared.enabled = toggles ? !HintPreferences.shared.enabled:true}
         default:
             if action.rawValue.hasPrefix("track:"), let track = p.tracks.first(where:{$0.id == String(action.rawValue.dropFirst(6))}), !setupLock.selectionBlocked {
-                if toggles && p.currentID == track.id && p.playing { p.pause() } else { p.play(track) }
+                if toggles && p.currentID == track.id && p.playing { p.toggle() } else { p.play(track) }
             }
         }
         message = "\(action.title): " + (toggles ? ((isOn(action) ?? false) ? "On" : "Off") : "Triggered")
