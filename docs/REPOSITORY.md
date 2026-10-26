@@ -10,6 +10,8 @@ Run from the repository root:
 python3 scripts/audit-source.py
 ```
 
+CI runs the source audit before the web checks. Superseded runs on the same branch are canceled.
+
 The audit checks the current tracked tree for disallowed artifacts and common credential/personal-path patterns. It is a targeted check, not a guarantee that every possible secret is detectable. Never commit personal `.hardplay` files, `.env` files or signed private URLs. Report a suspected credential privately; revoke it before considering history cleanup.
 
 `scripts/export-source.sh` creates a curated checkout in `build/github-project/`. It copies only the public manifest, preserves that checkout's Git metadata, removes stale exported files and runs the audit. It does not delete the original working materials, push commits or publish a release.
