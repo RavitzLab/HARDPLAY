@@ -1,9 +1,5 @@
-# Hard Play identity
+# Shipped Hard Play branding
 
-The brand is written on two lines: **Hard** above **Play**.
+`hardplay-wordmark-source.png` is the supplied wordmark used to generate the native app icon and menu-bar artwork. The build derives recolored/masked variants from this source. It is required by `scripts/build.sh`.
 
-- `hard-play-stacked-v1.png`: final logo lockup, navy background.
-- `hard-play-symbol-v1.png`: standalone blue/white ribbon and play emblem.
-- `hard-play-logo-v1.png`: earlier horizontal direction retained locally as an alternative.
-
-Created with the built-in image generation tool. PNG masters; no vector master is claimed. The shipped 0.13.0 app icon remains its original icon; these files are the new brand artwork.
+Unused earlier concepts, alternate icons and generation prompts are kept only in the local working archive, not in the curated public tree. The web edition keeps its own required cached icons in `web/public/`.

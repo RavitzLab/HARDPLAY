@@ -9,3 +9,21 @@ Playlists/
 node_modules/
 *.dmg
 *.zip
+
+# Private deployment configuration and generated artifacts
+web/.openai/
+web/dist/
+web/.fixtures/
+*.log
+*.tar.gz
+*.wav
+*.aif
+*.aiff
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.aac
+*.caf
+*.pem
+*.key

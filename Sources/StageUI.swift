@@ -60,7 +60,10 @@ final class ControlLock: ObservableObject {
                 guard start.isFinite, count > 0 else { continue }
                 pointer.withMemoryRebound(to: Float.self, capacity: count) { floats in
                     for i in stride(from: 0, to: count, by: 4) {
-                        let bin = min(159, max(0, Int((start + Double(i) / Double(count) * span) / seconds * 160)))
+                        let offset = Double(i) / Double(count)
+                        let position = (start + offset * span) / seconds
+                        let index = Int(position * 160)
+                        let bin = min(159, max(0, index))
                         let amplitude = Double(abs(floats[i]))
                         if amplitude.isFinite { peaks[bin] = max(peaks[bin], amplitude) }
                     }
@@ -184,9 +187,9 @@ struct CircularUnlockProgress {
         degrees=0;previous=angle(point,center:center)
     }
     private func angle(_ point:CGPoint,center:CGPoint)->Double? {
-        let dx=point.x-center.x,dy=point.y-center.y,r=hypot(dx,dy)
+        let dx=Double(point.x-center.x),dy=Double(point.y-center.y),r=hypot(dx,dy)
         guard (36...84).contains(r) else {return nil}
-        return atan2(dy,dx)*180 / .pi
+        return atan2(dy,dx)*180 / Double.pi
     }
     mutating func move(_ point:CGPoint,center:CGPoint)->Bool {
         guard let next=angle(point,center:center),let prior=previous else {degrees=0;previous=nil;return false}

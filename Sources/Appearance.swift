@@ -3,6 +3,7 @@ import AppKit
 
 struct StageTheme: Codable {
     var preset = "Tape Blue"
+    var customThemeID: UUID?
     var accent = "93C5F4"
     var background = "20252D"
     var text = "F2F3F6"
@@ -15,14 +16,21 @@ struct StageTheme: Codable {
     var spacing = 14.0
     var radius = 12.0
     var texture = true
-    var isLight:Bool {preset == "Blue & White" || preset == "Signal White"}
+    var isLight:Bool {
+        let rgb = UInt64(background, radix:16) ?? 0x20252D
+        let red = Double((rgb >> 16) & 255)
+        let green = Double((rgb >> 8) & 255)
+        let blue = Double(rgb & 255)
+        let luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722
+        return luminance > 160
+    }
     var usesMono:Bool {preset == "Mono Console" || preset == "Signal White"}
     var flatBackdrop:Bool {["Mono Console","Crew Tape","Signal White"].contains(preset)}
-    static let names = ["Blue & White","Tape Blue", "Tape White", "Tape Black", "FOH", "Stage Crew", "Stagehand", "Speaker Grille", "Road Case", "Stage", "Flightcase", "Cables", "Cinema", "Theatre", "Minimal", "Mono Console", "Crew Tape", "Signal White"]
+    static let names = ["Tape Blue", "FOH", "Tape Black", "Stage", "Cables", "Minimal", "Mono Console", "Crew Tape", "White"]
     static func named(_ name: String) -> StageTheme {
         var t = StageTheme(); t.preset = name
         switch name {
-        case "Blue & White": t.background="F5F8FD";t.text="172C4D";t.accent="1756A9";t.tape="DBE8FA";t.opacity=1;t.texture=false;t.radius=10;t.spacing=14
+        case "White", "Blue & White": t.background="F5F8FD";t.text="172C4D";t.accent="1756A9";t.tape="DBE8FA";t.opacity=1;t.texture=false;t.radius=10;t.spacing=14
         case "Mono Console": t.background="111820";t.text="E5EDF2";t.accent="8EC9DB";t.tape="DAE7E9";t.opacity=1;t.radius=4;t.spacing=14;t.texture=true
         case "Crew Tape": t.background="20211F";t.text="F1EEE5";t.accent="DEC283";t.tape="E6D4A4";t.opacity=1;t.radius=5;t.spacing=14;t.texture=true
         case "Signal White": t.background="F2F1EC";t.text="202B33";t.accent="245F73";t.tape="E7D59F";t.opacity=1;t.radius=6;t.spacing=14;t.texture=true
@@ -45,11 +53,20 @@ struct StageTheme: Codable {
         return t
     }
 }
+struct SavedStageTheme: Codable, Identifiable {
+    var id: UUID
+    var name: String
+    var theme: StageTheme
+}
 final class AppearancePreferences: ObservableObject {
     static let shared = AppearancePreferences()
-    @Published var theme: StageTheme { didSet { for window in NSApp?.windows ?? [] {window.appearance=NSAppearance(named:theme.isLight ? .aqua:.darkAqua)};if let data = try? JSONEncoder().encode(theme) { UserDefaults.standard.set(data, forKey:"stageAppearance.v1") } } }
-    init() {
-        let defaults=UserDefaults.standard
+    private let defaults: UserDefaults
+    @Published private(set) var customThemes: [SavedStageTheme] = [] {
+        didSet { if let data = try? JSONEncoder().encode(customThemes) { defaults.set(data,forKey:"stageCustomThemes.v1") } }
+    }
+    @Published var theme: StageTheme { didSet { for window in NSApp?.windows ?? [] {window.appearance=NSAppearance(named:theme.isLight ? .aqua:.darkAqua)};if let data = try? JSONEncoder().encode(theme) { defaults.set(data, forKey:"stageAppearance.v1") } } }
+    init(defaults: UserDefaults = .standard) {
+        self.defaults=defaults
         if !defaults.bool(forKey:"blueWhiteModes.v1") {
             if let previous=defaults.data(forKey:"stageAppearance.v1") {defaults.set(previous,forKey:"stageAppearance.beforeBlueWhite.v1")}
             defaults.set(try? JSONEncoder().encode(StageTheme.named("Blue & White")),forKey:"stageAppearance.v1");defaults.set(true,forKey:"blueWhiteModes.v1");defaults.set(true,forKey:"markerStyle.v1")
@@ -60,6 +77,39 @@ final class AppearancePreferences: ObservableObject {
             theme = .named("Tape Blue");defaults.set(true,forKey:"markerStyle.v1")
             if let data=try? JSONEncoder().encode(theme) {defaults.set(data,forKey:"stageAppearance.v1")}
         } else {theme=prior.flatMap {try? JSONDecoder().decode(StageTheme.self,from:$0)} ?? .named("Tape Blue")}
+        customThemes = defaults.data(forKey:"stageCustomThemes.v1").flatMap {try? JSONDecoder().decode([SavedStageTheme].self,from:$0)} ?? []
+        if theme.preset == "Blue & White" {theme.preset = "White"}
+        if !defaults.bool(forKey:"curatedThemes.v1"), !StageTheme.names.contains(theme.preset), theme.customThemeID == nil {
+            // Retain any existing customized appearance before hiding retired presets.
+            let previous = theme
+            let id = UUID()
+            var snapshot = previous; snapshot.customThemeID = id
+            customThemes.append(SavedStageTheme(id:id,name:"Imported \(previous.preset)",theme:snapshot))
+            theme = snapshot
+        }
+        defaults.set(true,forKey:"curatedThemes.v1")
+        if let data = try? JSONEncoder().encode(customThemes) {defaults.set(data,forKey:"stageCustomThemes.v1")}
+        if let data = try? JSONEncoder().encode(theme) {defaults.set(data,forKey:"stageAppearance.v1")}
+    }
+    var currentThemeName: String {
+        customThemes.first(where:{$0.id == theme.customThemeID})?.name ?? theme.preset
+    }
+    @discardableResult
+    func saveCustom(named name: String) -> Bool {
+        let name = name.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !name.isEmpty else { return false }
+        let index = customThemes.firstIndex(where:{$0.name.caseInsensitiveCompare(name) == .orderedSame})
+        let id = index.map { customThemes[$0].id } ?? UUID()
+        var snapshot = theme
+        snapshot.customThemeID = id
+        let saved = SavedStageTheme(id:id,name:name,theme:snapshot)
+        if let index {customThemes[index] = saved} else {customThemes.append(saved)}
+        theme = snapshot
+        return true
+    }
+    func removeCustom(_ id: UUID) {
+        customThemes.removeAll {$0.id == id}
+        if theme.customThemeID == id { theme.customThemeID = nil }
     }
     func color(_ key: WritableKeyPath<StageTheme,String>) -> Binding<Color> {
         Binding(get:{ Color(stageHex:self.theme[keyPath:key]) },set:{ color in
@@ -155,8 +205,12 @@ struct ThemedBackdrop: View {
             }
     }
 }
+final class ThemeNameDraft: ObservableObject {
+    @Published var name = ""
+}
 struct ThemeEditorView: View {
     var embedded=false
+    @StateObject private var draft = ThemeNameDraft()
     @ObservedObject var appearance = AppearancePreferences.shared
     @ObservedObject var setup = SetupLock.shared
     @ObservedObject var lock = ControlLock.shared
@@ -165,14 +219,10 @@ struct ThemeEditorView: View {
             VStack(alignment:.leading,spacing:16) {
                 Text("Themes & Appearance").font(.stage(.title2).bold())
                 Text("Lightweight native themes · mono console · crew tape · stage markings. Live preview stays in the player.").font(.stage(.callout)).foregroundStyle(.secondary)
-                LazyVGrid(columns:[GridItem(.flexible()),GridItem(.flexible())],spacing:8) {
-                    ForEach(StageTheme.names,id:\.self) { name in
-                        Button { appearance.theme = .named(name) } label: {
-                            HStack { Circle().fill(Color(stageHex:StageTheme.named(name).accent)).frame(width:12,height:12);Text(name);Spacer();if appearance.theme.preset == name { MarkerIcon(systemName:"checkmark") } }.padding(9)
-                        }.buttonStyle(PlayerControlStyle(active:appearance.theme.preset == name))
-                    }
-                }
+                presetGrid
+                savedThemes
                 Divider()
+                Text("Customize · \(appearance.currentThemeName)").font(.stage(.headline))
                 ColorPicker("Accent",selection:appearance.color(\.accent),supportsOpacity:false)
                 ColorPicker("Background",selection:appearance.color(\.background),supportsOpacity:false)
                 ColorPicker("Text",selection:appearance.color(\.text),supportsOpacity:false)
@@ -185,10 +235,41 @@ struct ThemeEditorView: View {
                 adjustment("Spacing",value:$appearance.theme.spacing,range:8...22,suffix:" px")
                 adjustment("Corner radius",value:$appearance.theme.radius,range:0...24,suffix:" px")
                 Toggle("Scenic texture",isOn:$appearance.theme.texture)
+                HStack {
+                    TextField("Theme name",text:$draft.name).textFieldStyle(.roundedBorder)
+                        .onSubmit {appearance.saveCustom(named:draft.name)}
+                    Button("Save Theme") {appearance.saveCustom(named:draft.name)}
+                        .buttonStyle(.borderedProminent)
+                        .disabled(draft.name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
+                }
+                Text("Save a new name to create a theme. Use an existing name to update it.").font(.stage(.caption)).foregroundStyle(.secondary)
                 Button("Reset to Tape Blue") { appearance.theme = .named("Tape Blue") }.buttonStyle(.bordered)
-                Text("Saved automatically on this Mac.").font(.stage(.caption)).foregroundStyle(.secondary)
+                Text("Current appearance is saved automatically on this Mac. Named themes stay in My Themes.").font(.stage(.caption)).foregroundStyle(.secondary)
             }.padding(22).disabled(setup.settingsBlocked || lock.isLocked)
         }.frame(minWidth:360,minHeight:embedded ? 300:500).foregroundStyle(Color(stageHex:appearance.theme.text))
+    }
+    private var presetGrid: some View {
+                LazyVGrid(columns:[GridItem(.flexible()),GridItem(.flexible())],spacing:8) {
+                    ForEach(StageTheme.names,id:\.self) { name in
+                        Button { appearance.theme = .named(name); draft.name = "" } label: {
+                            HStack { Circle().fill(Color(stageHex:StageTheme.named(name).accent)).frame(width:12,height:12);Text(name);Spacer();if appearance.theme.customThemeID == nil && appearance.theme.preset == name { MarkerIcon(systemName:"checkmark") } }.padding(9)
+                        }.buttonStyle(PlayerControlStyle(active:appearance.theme.customThemeID == nil && appearance.theme.preset == name))
+                    }
+                }
+    }
+    @ViewBuilder private var savedThemes: some View {
+                if !appearance.customThemes.isEmpty {
+                    Text("My Themes").font(.stage(.headline))
+                    ForEach(appearance.customThemes) { saved in
+                        HStack(spacing:8) {
+                            Button { appearance.theme = saved.theme; draft.name = saved.name } label: {
+                                HStack { Circle().fill(Color(stageHex:saved.theme.accent)).frame(width:12,height:12);Text(saved.name);Spacer();if appearance.theme.customThemeID == saved.id {MarkerIcon(systemName:"checkmark")} }.padding(9)
+                            }.buttonStyle(PlayerControlStyle(active:appearance.theme.customThemeID == saved.id))
+                            Button { appearance.removeCustom(saved.id) } label: {MarkerIcon(systemName:"trash")}
+                                .buttonStyle(.bordered).help("Delete saved theme").accessibilityLabel("Delete theme: \(saved.name)")
+                        }
+                    }
+                }
     }
     private func adjustment(_ title:String,value:Binding<Double>,range:ClosedRange<Double>,suffix:String,factor:Double=1)->some View {
         VStack(spacing:5) { HStack { Text(title);Spacer();Text("\(Int(value.wrappedValue*factor))\(suffix)").monospacedDigit().foregroundStyle(.secondary) };Slider(value:value,in:range).tint(accent).accessibilityLabel(title) }

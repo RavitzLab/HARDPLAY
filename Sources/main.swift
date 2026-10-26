@@ -1056,6 +1056,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var hoverOpened=false
     private var collapsedToMenuBar=false
     private var arrangingWorkspace=false
+    private var utilityReturnSurface:PlayerSurface = .main
     var hotKey: EventHotKeyRef?
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
@@ -1155,7 +1156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mappingWindow.title = "Hard Play Keyboard / MIDI"; mappingWindow.isReleasedWhenClosed = false; mappingWindow.delegate = self
         mappingWindow.contentMinSize = NSSize(width:500,height:500)
         mappingWindow.appearance = NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
-        mappingWindow.contentView = NSHostingView(rootView:MappingView().background(ThemedBackdrop()))
+        mappingWindow.contentView = NSHostingView(rootView:MappingView().utilityNavigation())
         mappingWindow.setFrameAutosaveName("HARDPLAY.mappings")
         pocketWindow = PocketPanel(contentRect:NSRect(x:100,y:100,width:344,height:380),styleMask:[.borderless,.nonactivatingPanel,.resizable],backing:.buffered,defer:false)
         pocketWindow.isOpaque=false;pocketWindow.backgroundColor = .clear;pocketWindow.level = .floating
@@ -1169,9 +1170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let restored=pocketWindow.frame;let limited=PocketPanel.limitedSize(restored.size)
         pocketWindow.setContentSize(limited)
         settingsWindow = utilityWindow(title:"Hard Play PATCH",width:420,height:680)
-        settingsWindow.contentView = NSHostingView(rootView:PlayerView(settingsOnly:true).padding(20).background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
+        settingsWindow.contentView = NSHostingView(rootView:PlayerView(settingsOnly:true).padding(20).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).utilityNavigation())
         themesWindow = utilityWindow(title:"Hard Play Themes",width:410,height:760)
-        themesWindow.contentView = NSHostingView(rootView:ThemeEditorView().background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
+        themesWindow.contentView = NSHostingView(rootView:ThemeEditorView().preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).utilityNavigation())
     }
     func showQuickEdit(_ track:Track) {
         guard !SetupLock.shared.editsBlocked,!ControlLock.shared.isLocked else {return}
@@ -1183,7 +1184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let window=quickEditWindow ?? utilityWindow(title:"Hard Play Quick Edit",width:760,height:780)
         window.contentMinSize=NSSize(width:620,height:650)
         if quickEditWindowModel !== model {
-            window.contentView=NSHostingView(rootView:QuickEditView(edit:model).background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
+            window.contentView=NSHostingView(rootView:QuickEditView(edit:model).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).utilityNavigation())
             quickEditWindowModel=model
         }
         quickEditWindow=window;restore(window);NSApp.activate(ignoringOtherApps:true)
@@ -1193,7 +1194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !SetupLock.shared.settingsBlocked,!ControlLock.shared.isLocked else {return}
         if viewerWindow == nil {
             viewerWindow=utilityWindow(title:"Hard Play Web Viewer",width:420,height:720)
-            viewerWindow.contentView=NSHostingView(rootView:WebViewerView().background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
+            viewerWindow.contentView=NSHostingView(rootView:WebViewerView().preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).utilityNavigation())
             viewerWindow.contentMinSize=NSSize(width:380,height:500);viewerWindow.center()
         }
         restore(viewerWindow);NSApp.activate(ignoringOtherApps:true)
@@ -1203,7 +1204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !SetupLock.shared.settingsBlocked,!ControlLock.shared.isLocked else {return}
         if backupWindow == nil {
             backupWindow=utilityWindow(title:"Hard Play Timecode & Backup",width:500,height:690)
-            backupWindow.contentView=NSHostingView(rootView:BackupView().background(ThemedBackdrop()).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
+            backupWindow.contentView=NSHostingView(rootView:BackupView().preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).utilityNavigation())
             backupWindow.contentMinSize=NSSize(width:440,height:540)
             backupWindow.center()
         }
@@ -1263,6 +1264,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let preferred,let i=windows.firstIndex(where:{$0 === preferred}) {windows.insert(windows.remove(at:i),at:0)}
         let frames=WorkspaceLayout.frames(main:main.frame,screen:screen,sizes:windows.map { $0.frame.size })
         for (window,frame) in zip(windows,frames) where window.frame != frame {window.setFrame(frame,display:true)}
+    }
+    func rememberUtilityOwner() {
+        guard WorkspaceState.shared.section == nil,
+              !workspaceWindows.contains(where:{$0.isVisible && workspaceSection(for:$0) != nil}) else {return}
+        utilityReturnSurface = miniWindow?.isVisible == true ? .mini : pocketWindow?.isVisible == true ? .nano : .main
+    }
+    @objc func returnToPlayer() {
+        guard !ControlLock.shared.isLocked else {return}
+        WorkspaceState.shared.player()
+        hideUtilityWindows()
+        switch utilityReturnSurface {
+        case .mini:showMini()
+        case .nano:showPocket();NSApp.activate(ignoringOtherApps:true)
+        default:showMain()
+        }
     }
     func utilityWindow(title:String,width:CGFloat,height:CGFloat)->NSWindow {
         let window=NSWindow(contentRect:NSRect(x:200,y:100,width:width,height:height),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
@@ -1593,6 +1609,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard !ControlLock.shared.isLocked else { return false }
+        if workspaceSection(for:sender) != nil || (sender === mainWindow && WorkspaceState.shared.section != nil) {
+            returnToPlayer()
+            return false
+        }
         collapseToMenuBar()
         return false
     }
@@ -1670,6 +1690,28 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
     try data.write(to:URL(fileURLWithPath:path))
     print("Rendered Hard Play icon")
 } else if CommandLine.arguments.contains("--style-check") {
+    let expectedThemes = ["Tape Blue","FOH","Tape Black","Stage","Cables","Minimal","Mono Console","Crew Tape","White"]
+    precondition(StageTheme.names == expectedThemes && StageTheme.named("White").isLight)
+    let themeSuite = "local.hardplay.theme-check.\(UUID().uuidString)"
+    let themeDefaults = UserDefaults(suiteName:themeSuite)!
+    let themePrefs = AppearancePreferences(defaults:themeDefaults)
+    themePrefs.theme = .named("Mono Console")
+    themePrefs.theme.accent = "AB1234"
+    themePrefs.theme.mainWindowOpacity = 0.55
+    themePrefs.theme.buttonSize = 72
+    precondition(!themePrefs.saveCustom(named:"  "))
+    precondition(themePrefs.saveCustom(named:"My FOH"))
+    let firstThemeID = themePrefs.theme.customThemeID
+    let reloadedThemes = AppearancePreferences(defaults:themeDefaults)
+    precondition(reloadedThemes.customThemes.count == 1 && reloadedThemes.theme.customThemeID == firstThemeID)
+    precondition(reloadedThemes.theme.accent == "AB1234" && reloadedThemes.theme.usesMono && reloadedThemes.theme.mainWindowOpacity == 0.55 && reloadedThemes.theme.buttonSize == 72)
+    reloadedThemes.theme.textScale = 1.2
+    precondition(reloadedThemes.saveCustom(named:"my foh") && reloadedThemes.customThemes.count == 1 && reloadedThemes.theme.customThemeID == firstThemeID)
+    precondition(reloadedThemes.saveCustom(named:"Second") && reloadedThemes.customThemes.count == 2)
+    reloadedThemes.removeCustom(reloadedThemes.theme.customThemeID!)
+    precondition(reloadedThemes.theme.customThemeID == nil && AppearancePreferences(defaults:themeDefaults).customThemes.count == 1)
+    themeDefaults.removePersistentDomain(forName:themeSuite)
+    print("PASS: nine built-in themes; custom theme save, reload, update, copy and delete")
     precondition(StageTypography.name.lowercased().contains("balsamiq"))
     precondition(StageTheme.named("Mono Console").usesMono && StageTheme.named("Mono Console").flatBackdrop)
     precondition(StageTheme.named("Signal White").isLight && StageTheme.named("Crew Tape").flatBackdrop)
