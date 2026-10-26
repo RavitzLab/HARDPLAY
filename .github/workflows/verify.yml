@@ -24,7 +24,7 @@ jobs:
       - run: node scripts/validate-artifact.mjs
         working-directory: web
   mac:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - run: zsh scripts/release.sh
