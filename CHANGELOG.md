@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.36.1
+
+- Added explicitly armed Linked Playback: Play/Pause, Next/Previous and seeks from either Mac control the pair; Primary A drives state and Shuffle choices.
+- Backup B follows the actual queue index and position, including duplicate cues and automatic transitions. Local volume and outputs remain independent.
+- Set sync and live transport now have distinct status labels. Both Macs must enable Linked Playback while paused after verifying the same set.
+- Locks, changed sets, audio errors and disconnects disable linking; network loss leaves local audio playing. LAN transport is not sample-accurate hardware timecode or failover.
+
 ## 0.36.0
 
 - One-button push/pull set synchronization between paired Macs, with direction selection and review before applying.
