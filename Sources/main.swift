@@ -89,6 +89,11 @@ final class Player: ObservableObject {
     private var publishNowPlaying = true
     private var restoring = true
     private let defaults: UserDefaults
+    var linkedAction:((BackupPlayAction)->Bool)?
+    var linkedStateDidChange:(()->Void)?
+    var linkedFollower=false {didSet {if !linkedFollower {linkedPendingTrackID=nil};configureEndBoundary()}}
+    private var linkedPendingTrackID:String?
+    private var applyingLinkedState=false
     private var positions: [String: Double] = [:]
     private var armedStartPoints:Set<String>=[]
     private var endBoundary: Any?
@@ -148,7 +153,7 @@ final class Player: ObservableObject {
         if remoteCommands {AudioRouting.shared.register(engine,role:.main)}
         installTimeObserver()
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
-            guard let self, let item = note.object as? AVPlayerItem, item === self.engine.currentItem else { return }
+            guard let self, let item = note.object as? AVPlayerItem, item === self.engine.currentItem else { return };if self.linkedFollower {return}
             if self.endMode == .stop { self.pause(); self.stoppedAtBoundary = true }
             else if self.repeatOne {self.repeatCurrent()}
             else if self.preparationTask == nil { self.next(automatic: true) }
@@ -367,6 +372,7 @@ final class Player: ObservableObject {
     }
     func play(_ track: Track) {
         guard !setupLock.selectionBlocked else { return }
+        if !applyingLinkedState,let index=tracks.firstIndex(where:{$0.id == track.id}),linkedAction?(.init(kind:"play",index:index)) == true {return}
         selectedID=track.id
         if currentID == track.id { load(track); return }
         guard playing, !isLoading, let current, fadeMode(after: current).seconds > 0, duration - elapsed > 0.15 else {
@@ -376,7 +382,7 @@ final class Player: ObservableObject {
         prepareCrossfade(to: track, manual: true)
     }
     private func checkAutomaticCrossfade() {
-        guard playing, !repeatOne, !isLoading, !isCrossfading, endMode == .next, let current, failedPreparationSource != currentID else { return }
+        guard !linkedFollower, playing, !repeatOne, !isLoading, !isCrossfading, endMode == .next, let current, failedPreparationSource != currentID else { return }
         let length = min(fadeMode(after: current).seconds, duration / 2)
         guard length > 0 else { return }
         if let prepared, !manualPreparation, duration - elapsed <= min(length, prepared.duration / 2) {
@@ -508,6 +514,49 @@ final class Player: ObservableObject {
         if current == nil, let first = tracks.first { load(first, autoplay: false) }
         if files.isEmpty { error = "No supported audio files were found." }
         persist()
+    }
+    var acceptsLinkedPlayback:Bool {!setupLock.playbackBlocked && !setupLock.selectionBlocked && !ControlLock.shared.isLocked}
+    var linkedPlaybackState:BackupPlayState? {
+        guard !isLoading,error == nil,let index=tracks.firstIndex(where:{$0.id == currentID}) else {return nil}
+        return .init(index:index,seconds:elapsed,playing:playing,crossfading:isCrossfading)
+    }
+    func performLinkedAction(_ action:BackupPlayAction) {
+        guard acceptsLinkedPlayback,action.valid else {return}
+        applyingLinkedState=true;defer {applyingLinkedState=false;nowPlaying()}
+        switch action.kind {
+        case "toggle":toggle()
+        case "pause":pause()
+        case "next":next()
+        case "previous":previous()
+        case "seek":if let seconds=action.seconds {seek(seconds)}
+        case "play":if let index=action.index,tracks.indices.contains(index) {play(tracks[index])}
+        default:break
+        }
+    }
+    func followLinkedPlayback(_ state:BackupPlayState) {
+        guard acceptsLinkedPlayback,state.valid,tracks.indices.contains(state.index) else {return}
+        applyingLinkedState=true;defer {applyingLinkedState=false}
+        let track=tracks[state.index]
+        if currentID != track.id {
+            if linkedPendingTrackID == track.id && (isLoading || preparationTask != nil) {return}
+            linkedPendingTrackID=track.id
+            selectedID=track.id
+            if state.playing && playing && state.crossfading {play(track)}
+            else {load(track,autoplay:state.playing,position:state.seconds,precisePosition:true,ignoreStartPoint:true)}
+            return
+        }
+        guard !isLoading else {return}
+        linkedPendingTrackID=nil
+        if !state.crossfading && isCrossfading {cancelCrossfade()}
+        if abs(elapsed-state.seconds)>0.35 || (!state.playing && abs(elapsed-state.seconds)>0.03) {
+            elapsed=min(max(0,state.seconds),max(0,duration-1/600))
+            engine.seek(to:CMTime(seconds:elapsed,preferredTimescale:600),toleranceBefore:.zero,toleranceAfter:.zero)
+        }
+        if state.playing {
+            stoppedAtBoundary=false;engine.play();outgoing?.play();playing=engine.rate>0
+            consumeStartPoint(track)
+        }else {engine.pause();outgoing?.pause();playing=false}
+        rememberPosition();persist();nowPlaying()
     }
     var canSynchronizeSet:Bool {!playing && !isLoading && !isCrossfading && !setupLock.isLocked && !ControlLock.shared.isLocked}
     /// Apply metadata to locally matched files as one reversible edit. Never writes source audio or the existing playlist document.
@@ -691,11 +740,11 @@ final class Player: ObservableObject {
     var crossfadeDiagnostics: (outgoingRate: Float, incomingRate: Float, outgoingVolume: Float, incomingVolume: Float, length: Double) {
         (outgoing?.rate ?? 0, engine.rate, outgoing?.volume ?? 0, engine.volume, fadeLength)
     }
-    func load(_ track: Track, autoplay: Bool = true, position: Double? = nil, precisePosition:Bool = false) {
+    func load(_ track: Track, autoplay: Bool = true, position: Double? = nil, precisePosition:Bool = false, ignoreStartPoint:Bool = false) {
         rememberPosition()
         cancelCrossfade()
-        if !autoplay,startPoint(for:track) != nil {armedStartPoints.insert(track.id)}
-        let cue = autoplay ? startPoint(for:track):nil
+        if !ignoreStartPoint,!autoplay,startPoint(for:track) != nil {armedStartPoints.insert(track.id)}
+        let cue = autoplay && !ignoreStartPoint ? startPoint(for:track):nil
         let exact = precisePosition || cue != nil
         let startOffset = cue?.seconds ?? position ?? (startMode == .resume ? positions[track.id, default: 0] : 0)
         loadingTask?.cancel(); failureObservation = nil
@@ -748,6 +797,12 @@ final class Player: ObservableObject {
     }
     func toggle() {
         guard !setupLock.playbackBlocked else { return }
+        if !applyingLinkedState {
+            let action:BackupPlayAction
+            if !playing,let selected=selectedTrack,selected.id != currentID,let index=tracks.firstIndex(where:{$0.id == selected.id}) {action = .init(kind:"play",index:index)}
+            else {action = .init(kind:"toggle")}
+            if linkedAction?(action) == true {return}
+        }
         guard !isLoading else { return }
         if !playing, let selected=selectedTrack, selected.id != currentID { play(selected); return }
         if engine.currentItem == nil || engine.currentItem?.status == .failed { if let track = current ?? tracks.first { load(track) }; return }
@@ -764,6 +819,7 @@ final class Player: ObservableObject {
         positions[id] = elapsed
     }
     func pause() {
+        if !applyingLinkedState,linkedAction?(.init(kind:"pause")) == true {return}
         engine.pause(); outgoing?.pause(); playing = false; rememberPosition(); nowPlaying(); persist()
     }
     func restart() {
@@ -852,6 +908,7 @@ final class Player: ObservableObject {
     }
     func seek(_ seconds: Double) {
         guard !setupLock.playbackBlocked else { return }
+        if !applyingLinkedState,linkedAction?(.init(kind:"seek",seconds:seconds)) == true {return}
         guard !isLoading else { return }
         cancelCrossfade()
         elapsed = max(0, min(seconds, duration)); stoppedAtBoundary = false
@@ -863,7 +920,7 @@ final class Player: ObservableObject {
     }
     func configureEndBoundary() {
         clearEndBoundary()
-        guard endMode == .stop, duration > 0, !isLoading else { return }
+        guard !linkedFollower,endMode == .stop, duration > 0, !isLoading else { return }
         // Short tracks retain their first half when the chosen tail exceeds their length.
         let cutoff = max(duration / 2, duration - max(0, stopBeforeEnd))
         guard cutoff > elapsed + 0.01, cutoff < duration else { return }
@@ -873,6 +930,8 @@ final class Player: ObservableObject {
         }
     }
     func next(automatic: Bool = false) {
+        if automatic && linkedFollower {return}
+        if !automatic,!applyingLinkedState,linkedAction?(.init(kind:"next")) == true {return}
         if automatic && repeatOne && endMode == .next {repeatCurrent();return}
         guard automatic || !setupLock.selectionBlocked else { return }
         guard !tracks.isEmpty else { return }
@@ -883,6 +942,7 @@ final class Player: ObservableObject {
     }
     func previous() {
         guard !setupLock.selectionBlocked else { return }
+        if !applyingLinkedState,linkedAction?(.init(kind:"previous")) == true {return}
         if elapsed > 3 { seek(0); return }
         guard !tracks.isEmpty else { return }
         let index = tracks.firstIndex { $0.id == currentID } ?? 0
@@ -961,6 +1021,7 @@ final class Player: ObservableObject {
         queueSelection=selection;cancelCrossfade();persist();nowPlaying()
     }
     func nowPlaying() {
+        if !applyingLinkedState {linkedStateDidChange?()}
         guard publishNowPlaying else { return }
         guard let current else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; return }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: current.title, MPMediaItemPropertyArtist: "HARDPLAY", MPMediaItemPropertyPlaybackDuration: duration, MPNowPlayingInfoPropertyElapsedPlaybackTime: elapsed, MPNowPlayingInfoPropertyPlaybackRate: playing ? 1.0 : 0.0]
@@ -1768,6 +1829,8 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
     precondition(HardPlayBrand.wordmark != nil)
     for name in ["Tape Blue","Tape White","Tape Black","FOH","Stage Crew","Stagehand"] {let theme=StageTheme.named(name);precondition(theme.preset == name && theme.texture)}
     print("PASS: bundled marker font registered as \(StageTypography.name), dedicated mini marker font, Hard Play wordmark artwork and tape/crew presets available")
+ } else if CommandLine.arguments.contains("--linked-playback-test") {
+    Task { @MainActor in do {try await runLinkedPlaybackTests();exit(0)} catch {print("FAIL: \(error as NSError)");exit(1)} };RunLoop.main.run()
  } else if CommandLine.arguments.contains("--set-sync-test") {
     Task { @MainActor in do {try await runSetSyncTests();exit(0)} catch {print("FAIL: \(error as NSError)");exit(1)} };RunLoop.main.run()
 } else if CommandLine.arguments.contains("--media-import-test") {

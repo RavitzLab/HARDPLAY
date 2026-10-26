@@ -23,7 +23,7 @@ struct BackupView:View {
         ScrollView {
             VStack(alignment:.leading,spacing:16) {
                 Text("Timecode & Backup").font(.stage(.title2).bold())
-                Text("Connect once, choose the source Mac, then synchronize the tracks you already loaded. Playback stays independent.").font(.stage(.callout)).foregroundStyle(.secondary)
+                Text("Connect once, choose the source Mac, then synchronize the tracks you already loaded. Set sync and Linked Playback are separate steps.").font(.stage(.callout)).foregroundStyle(.secondary)
                 MarkerLabel(link.summary,systemImage:link.verified ? "checkmark.shield":"desktopcomputer").font(.stage(size:13,weight:.semibold)).padding(12).frame(maxWidth:.infinity,alignment:.leading).background(accent.opacity(0.12),in:RoundedRectangle(cornerRadius:12)).accessibilityIdentifier("backup-status")
                 VStack(alignment:.leading,spacing:8) {
                     Text("1 · Connect").font(.stage(.headline))
@@ -55,6 +55,7 @@ struct BackupView:View {
                     }.padding(7)
                 }.padding(10).background(.white.opacity(0.035),in:RoundedRectangle(cornerRadius:12))
                 BackupSetSyncControls(link:link,blocked:blocked)
+                BackupLinkedPlaybackControls(link:link,blocked:blocked)
                 DisclosureGroup(isExpanded:$ui.verificationExpanded) {
                     VStack(alignment:.leading,spacing:10) {
                         Text("Compare audio contents, queue order, fades, Auto Stop and resume positions. Run this on both Macs while paused.").font(.stage(.caption)).foregroundStyle(.secondary)
@@ -72,7 +73,7 @@ struct BackupView:View {
                     }.frame(maxWidth:.infinity,alignment:.leading).padding(7)
                 } label:{Text("Verify / Export Backup Package").font(.stage(.headline))}
                 .padding(10).background(.white.opacity(0.035),in:RoundedRectangle(cornerRadius:12))
-                Text("Next stages: scheduled playback → LTC / MTC → armed hardware failover. Set synchronization copies playlist metadata; it does not synchronize the playback clock or arm audio failover.").font(.stage(.caption)).foregroundStyle(.secondary)
+                Text("Linked Playback sends control and position updates over LAN. Sample-accurate clock sync, LTC / MTC and hardware failover are not enabled.").font(.stage(.caption)).foregroundStyle(.secondary)
                 Text("Network loss never stops your music or changes the audio source.").font(.stage(.caption)).foregroundStyle(.secondary)
             }.padding(20).disabled(blocked)
         }.frame(minWidth:440,minHeight:embedded ? 300:540).onAppear {link.observe(player);ui.selectedRole=link.role}

@@ -43,18 +43,38 @@ struct BackupSetSyncControls:View {
     }
 }
 
+struct BackupLinkedPlaybackControls:View {
+    @ObservedObject var link:BackupLink
+    var blocked=false
+    var body:some View {
+        VStack(alignment:.leading,spacing:10) {
+            Text("3 · Linked Playback").font(.stage(.headline))
+            Toggle("Link Play / Pause / Next",isOn:Binding(get:{link.playbackRequested},set:{link.setPlaybackLinked($0)}))
+                .toggleStyle(.switch).disabled(blocked || (!link.playbackRequested && !link.canEnablePlayback))
+                .accessibilityLabel("Linked Playback")
+            Text(link.playbackStatus).font(.stage(.callout)).foregroundStyle(link.linkedPlayback ? .green:accent).fixedSize(horizontal:false,vertical:true)
+            Text("Enable on both Macs while paused, after synchronizing the set. Primary A drives playback; buttons on either Mac control the pair. Seek, track changes, Repeat and Shuffle follow A. Each Mac keeps its own audio output and volume.")
+                .font(.stage(.caption)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
+            if !link.peerSupportsPlayback {Text("Both Macs need Hard Play 0.36.1 or newer.").font(.stage(.caption)).foregroundStyle(.orange)}
+            else if !link.verified {Text("Synchronize or check both sets first.").font(.stage(.caption)).foregroundStyle(.secondary)}
+            Text("Linked control over LAN, not sample-accurate timecode. A disconnect disables the link; local playback continues. Reconnect and enable the link again manually.")
+                .font(.stage(.caption)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
+        }.padding(12).frame(maxWidth:.infinity,alignment:.leading).background(accent.opacity(0.07),in:RoundedRectangle(cornerRadius:12))
+    }
+}
+
 struct BackupConnectionButton:View {
     @ObservedObject private var link=BackupLink.shared
-    private var color:Color {link.verified ? .green:link.syncing ? accent:link.connected ? .orange:.secondary}
-    private var state:String {link.syncing ? "Synchronizing":link.verified ? "Sets match":link.connected ? "Connected · sets unchecked or different":link.listening ? "Waiting for peer":"Offline"}
+    private var color:Color {link.linkedPlayback ? .green:link.syncing ? accent:link.connected ? .orange:.secondary}
+    private var state:String {link.linkedPlayback ? "Playback linked":link.playbackRequested ? "Waiting for playback link":link.syncing ? "Synchronizing":link.verified ? "Sets match · Playback OFF":link.connected ? "Connected · sets unchecked or different":link.listening ? "Waiting for peer":"Offline"}
     var body:some View {
         Button {AppDelegate.shared.showBackupWindow()} label:{
             HStack(spacing:5) {
-                Image(systemName:link.verified ? "checkmark.circle":"arrow.triangle.2.circlepath").font(.system(size:14))
+                Image(systemName:link.linkedPlayback ? "play.circle":"arrow.triangle.2.circlepath").font(.system(size:14))
                 VStack(spacing:2) {Text(link.role == .primary ? "A":"B").font(.system(size:10,weight:.bold));Circle().fill(color).frame(width:5,height:5)}
             }.frame(width:42,height:32)
         }.buttonStyle(PlayerControlStyle(active:link.connected)).accessibilityLabel("Backup Sync Settings")
             .accessibilityValue(link.role.rawValue+" · "+state+" · Timecode inactive")
-            .stageHint(link.role.rawValue+" · "+state+". Open Timecode & Backup. Timecode is not active; this indicator reports connection and set matching.")
+            .stageHint(link.role.rawValue+" · "+state+". Open Timecode & Backup. Timecode is not active; this indicator reports connection, set matching and Linked Playback.")
     }
 }
