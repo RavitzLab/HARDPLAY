@@ -1,4 +1,4 @@
-# Validation — Hard Play 0.36.1
+# Validation — Hard Play 0.36.2
 
 - macOS arm64 release build, model self-test, queue and style checks passed.
 - Clip tests cover exact sample trim/join, original-file preservation, export cancellation, Undo/Redo, stereo edge-silence detection, internal silence retention, silent/no-edge cases, and custom fade persistence.
@@ -30,3 +30,9 @@
 - Required build/model/queue/style checks and set-sync regression passed. This is LAN transport/state following, not a sample-accurate audio clock or measured physical two-Mac synchronization guarantee.
 
 - Installed 0.36.1 verified by codesign and Info.plist; Timecode & Backup shows the separate Linked Playback switch, current status and both-Mac version requirement. The existing paused queue and position were preserved.
+
+## Exit isolation — 0.36.2
+
+- Real muted AVPlayer/TLS tests passed for normal exit of Backup B and Primary A: the other player keeps playing. Network disconnect independently preserves both local players.
+- Explicit UI and MIDI toggles are separate from internal pause/lifecycle calls. The linked-playback-v2 capability requires both peers to support exit protection.
+- Final release/model/queue/style and linked-playback tests passed locally. Physical two-Mac clock accuracy is still unmeasured.
