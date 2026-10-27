@@ -9,7 +9,7 @@ final class BackupLink:ObservableObject {
     static let shared=BackupLink(defaults:.standard)
     enum Role:String,CaseIterable,Codable {case primary="Primary A",backup="Backup B"}
     struct Peer:Identifiable {let id:String;let endpoint:NWEndpoint;let name:String}
-    struct Packet:Codable {let version:Int;let kind:String;let role:Role;let name:String;let manifest:BackupManifest?;var sync:BackupSyncMessage? = nil;var capabilities:[String]? = nil;var playback:BackupPlayMessage? = nil}
+    struct Packet:Codable {let version:Int;let kind:String;let role:Role;let name:String;let manifest:BackupManifest?;var sync:BackupSyncMessage? = nil;var capabilities:[String]? = nil;var playback:BackupPlayMessage? = nil;var probe:SyncProbe? = nil}
     @Published private(set) var role:Role = .primary
     @Published private(set) var peers:[Peer]=[]
     @Published private(set) var code=""
@@ -30,6 +30,44 @@ final class BackupLink:ObservableObject {
     @Published private(set) var playbackRequested=false
     @Published private(set) var linkedPlayback=false
     @Published private(set) var playbackStatus="Linked Playback is off."
+    @Published private(set) var peerSupportsTiming=false
+    @Published private(set) var timingRTT:Double=0
+    @Published private(set) var timingJitter:Double=0
+    @Published private(set) var timingDriftMS:Double?=nil
+    @Published private(set) var timingStatus="Not measured"
+    @Published var autoAlign=false {didSet {if !autoAlign {source?.resetLinkedRate()}}}
+    @Published var manualOffsetMS:Double=0 {didSet {
+        let clipped=manualOffsetMS.isFinite ? min(250,max(-250,manualOffsetMS)):0
+        if manualOffsetMS != clipped {manualOffsetMS=clipped}
+    }}
+    private var clock=SyncClockEstimate()
+    private var pendingProbes:[UUID:Double]=[:]
+    private var lastRemoteState:BackupPlayState?
+    private var lastRemoteAt=0.0
+    var timingReady:Bool {connected && peerSupportsTiming && clock.ready(at:ProcessInfo.processInfo.systemUptime)}
+    func measureSync() {
+        guard connected,peerSupportsTiming else {timingStatus="Update both Macs to measure sync";return}
+        clock=SyncClockEstimate();pendingProbes=[:];timingDriftMS=nil;timingStatus="Measuring…"
+        let session=epoch
+        for step in 0..<6 {DispatchQueue.main.asyncAfter(deadline:.now()+Double(step)*0.12) {[weak self] in guard let self,self.epoch==session,self.connected else {return};self.sendProbe()}}
+    }
+    private func sendProbe() {
+        guard connected,peerSupportsTiming else {return}
+        let now=ProcessInfo.processInfo.systemUptime,id=UUID()
+        pendingProbes=pendingProbes.filter {now-$0.value<3};pendingProbes[id]=now
+        send("clock-ping",probe:.init(id:id,sent:now))
+    }
+    private func handleProbe(_ packet:Packet) {
+        guard peerSupportsTiming,let probe=packet.probe else {return}
+        let now=ProcessInfo.processInfo.systemUptime
+        if packet.kind=="clock-ping" {send("clock-pong",probe:.init(id:probe.id,sent:probe.sent,received:now,replied:ProcessInfo.processInfo.systemUptime));return}
+        if packet.kind=="clock-pong",let sent=pendingProbes.removeValue(forKey:probe.id),sent==probe.sent,let received=probe.received,let replied=probe.replied,let sample=SyncClockSample(sent:sent,received:received,replied:replied,arrived:now) {
+            clock.add(sample);timingRTT=clock.rtt*1000;timingJitter=clock.jitter*1000
+            if !timingReady {timingStatus=clock.samples.count<4 ? "Measuring…":"Unstable link"}
+            else if !linkedPlayback {timingStatus="Network measured · link playback to compare positions"}
+        }
+        if packet.kind=="clock-report",role == .primary,linkedPlayback {timingDriftMS=probe.driftMS;timingStatus=probe.status ?? "Measuring…"}
+    }
     private var peerPlaybackRequested=false
     private var playbackToken:UUID?
     private var peerPlaybackToken:UUID?
@@ -154,6 +192,7 @@ final class BackupLink:ObservableObject {
                     guard let self,self.connection === candidate else {return}
                     if ProcessInfo.processInfo.systemUptime-self.lastReceive>4 {self.drop("Peer offline · audio unchanged");return}
                     self.send("heartbeat")
+                    if self.peerSupportsTiming {self.sendProbe();if !self.timingReady {self.timingStatus="Unstable link";self.source?.resetLinkedRate()}}
                 }
             case .waiting(let error):self.status="Waiting for network: \(error.localizedDescription)"
             case .failed(let error):self.drop("Connection failed · check code / network: \(error.localizedDescription)")
@@ -164,9 +203,9 @@ final class BackupLink:ObservableObject {
         candidate.start(queue:.main)
         DispatchQueue.main.asyncAfter(deadline:.now()+8) { [weak self,weak candidate] in guard let self,let candidate,self.connection === candidate,!self.connected else {return};self.drop("Pairing timed out · check the code and network") }
     }
-    private func send(_ kind:String,manifest:BackupManifest? = nil,sync:BackupSyncMessage? = nil,playback:BackupPlayMessage? = nil) {
+    private func send(_ kind:String,manifest:BackupManifest? = nil,sync:BackupSyncMessage? = nil,playback:BackupPlayMessage? = nil,probe:SyncProbe? = nil) {
         guard let connection else {return}
-        let packet=Packet(version:1,kind:kind,role:role,name:name,manifest:manifest ?? (kind == "manifest" ? local:nil),sync:sync,capabilities:kind == "hello" ? ["set-sync-v1","linked-playback-v2"]:nil,playback:playback)
+        let packet=Packet(version:1,kind:kind,role:role,name:name,manifest:manifest ?? (kind == "manifest" ? local:nil),sync:sync,capabilities:kind == "hello" ? ["set-sync-v1","linked-playback-v2","sync-timing-v1"]:nil,playback:playback,probe:probe)
         guard let payload=try? JSONEncoder().encode(packet),payload.count<=Self.maxFrame else {return}
         var length=UInt32(payload.count).bigEndian;var frame=withUnsafeBytes(of:&length) {Data($0)};frame.append(payload)
         connection.send(content:frame,completion:.contentProcessed { [weak self,weak connection] error in if let error,let connection {DispatchQueue.main.async {guard let self,self.connection === connection else {return};self.drop("Send failed: \(error.localizedDescription)")}} })
@@ -179,7 +218,7 @@ final class BackupLink:ObservableObject {
             guard size>0,size<=maxFrame else {throw BackupFailure("Invalid backup message length")}
             guard buffer.count>=4+Int(size) else {break}
             let packet=try JSONDecoder().decode(Packet.self,from:Data(buffer.dropFirst(4).prefix(Int(size))))
-            guard packet.version == 1,["hello","heartbeat","manifest","invalidate","sync-request","sync-snapshot","sync-apply","sync-result","sync-cancel","transport-arm","transport-request","transport-state"].contains(packet.kind),packet.name.utf8.count<=1000,(packet.manifest == nil || (["manifest","sync-snapshot","sync-apply","sync-result"].contains(packet.kind) && packet.manifest!.valid)),
+            guard packet.version == 1,["hello","heartbeat","manifest","invalidate","sync-request","sync-snapshot","sync-apply","sync-result","sync-cancel","transport-arm","transport-request","transport-state","clock-ping","clock-pong","clock-report"].contains(packet.kind),packet.name.utf8.count<=1000,(packet.manifest == nil || (["manifest","sync-snapshot","sync-apply","sync-result"].contains(packet.kind) && packet.manifest!.valid)),
                   (packet.capabilities?.count ?? 0)<=8,(packet.capabilities?.allSatisfy {$0.utf8.count<=80} ?? true),
                   (!packet.kind.hasPrefix("sync-") || packet.sync?.valid == true),
                   (packet.kind != "sync-snapshot" && packet.kind != "sync-apply" || (packet.manifest != nil && packet.sync?.token != nil)),
@@ -187,7 +226,8 @@ final class BackupLink:ObservableObject {
                   (!packet.kind.hasPrefix("transport-") || packet.playback?.valid == true),
                   (packet.kind != "transport-arm" || packet.playback?.enabled != nil),
                   (packet.kind != "transport-request" || packet.playback?.action != nil),
-                  (packet.kind != "transport-state" || packet.playback?.state != nil) else {throw BackupFailure("Unsupported backup protocol")}
+                  (packet.kind != "transport-state" || packet.playback?.state != nil),
+                  (!packet.kind.hasPrefix("clock-") || packet.probe?.valid == true) else {throw BackupFailure("Unsupported backup protocol")}
             packets.append(packet);buffer=Data(buffer.dropFirst(4+Int(size)))
         }
         guard buffer.count<=maxFrame+4 else {throw BackupFailure("Backup message too large")};return packets
@@ -200,12 +240,14 @@ final class BackupLink:ObservableObject {
                 for packet in try Self.extract(&self.incoming) {
                     guard packet.role != self.role else {throw BackupFailure("Choose opposite roles: Primary A and Backup B")}
                     self.lastReceive=ProcessInfo.processInfo.systemUptime
-                    if packet.kind == "hello" {self.connected=true;self.peerSupportsSync=packet.capabilities?.contains("set-sync-v1") == true;self.peerSupportsPlayback=packet.capabilities?.contains("linked-playback-v2") == true;self.peerName=packet.name;self.code="";self.status="Connected · TLS";if self.local != nil {self.send("manifest")}}
+                    if packet.kind == "hello" {self.connected=true;self.peerSupportsSync=packet.capabilities?.contains("set-sync-v1") == true;self.peerSupportsPlayback=packet.capabilities?.contains("linked-playback-v2") == true;self.peerSupportsTiming=packet.capabilities?.contains("sync-timing-v1") == true;self.peerName=packet.name;self.code="";self.status="Connected · TLS";if self.local != nil {self.send("manifest")}}
                     else {guard self.connected else {throw BackupFailure("Expected peer hello first")}}
                     if packet.kind == "manifest" {self.remote=packet.manifest;self.compare()}
                     if packet.kind == "invalidate" {self.disablePlayback("Other set changed. Synchronize and enable Linked Playback again.",notify:false);self.remote=nil;self.compare();self.cancelSync(message:"Other set changed. Synchronize again.")}
                     if packet.kind.hasPrefix("sync-") {self.handleSync(packet)}
                     if packet.kind.hasPrefix("transport-") {self.handlePlayback(packet)}
+                    if packet.kind.hasPrefix("clock-") {self.handleProbe(packet)}
+                    if packet.kind=="hello",self.peerSupportsTiming {self.measureSync()}
                 }
             } catch {self.drop(error.localizedDescription);return}
             if complete || error != nil {self.drop("Peer disconnected · audio unchanged");return}
@@ -369,7 +411,7 @@ final class BackupLink:ObservableObject {
         let hadLink=playbackRequested || linkedPlayback || peerPlaybackRequested
         if notify,hadLink {send("transport-arm",playback:.init(token:playbackToken ?? UUID(),sequence:0,enabled:false))}
         playbackRequested=false;linkedPlayback=false;peerPlaybackRequested=false;playbackToken=nil;peerPlaybackToken=nil
-        playbackConfiguration=nil;peerPlaybackFingerprint=nil;source?.linkedFollower=false;receivedPlaySequence=0
+        playbackConfiguration=nil;peerPlaybackFingerprint=nil;source?.linkedFollower=false;source?.resetLinkedRate();autoAlign=false;timingDriftMS=nil;lastRemoteState=nil;receivedPlaySequence=0
         if hadLink {playbackStatus=message}
     }
     private func playbackIsCurrent()->Bool {
@@ -395,7 +437,7 @@ final class BackupLink:ObservableObject {
         guard force || key != lastPlayKey || now-lastPlaySent>=0.5 || abs(state.seconds-expected)>0.2 else {return}
         guard playbackIsCurrent() else {return}
         lastPlayKey=key;lastPlaySent=now;lastPlaySeconds=state.seconds;playSequence += 1
-        send("transport-state",playback:.init(token:token,sequence:playSequence,fingerprint:manifest.playbackFingerprint,state:state))
+        send("transport-state",playback:.init(token:token,sequence:playSequence,fingerprint:manifest.playbackFingerprint,state:state,sentAt:now,positionJump:abs(state.seconds-expected)>0.2))
     }
     private func handlePlayback(_ packet:Packet) {
         guard peerSupportsPlayback,let message=packet.playback else {return}
@@ -414,10 +456,37 @@ final class BackupLink:ObservableObject {
             player.performLinkedAction(action);broadcastPlayback(force:true)
         }else if packet.kind == "transport-state",role == .backup,let state=message.state,
                   let manifest=local,manifest.entries.indices.contains(state.index),state.seconds<=Double(manifest.entries[state.index].durationMS)/1000+1 {
-            player.followLinkedPlayback(state)
+            let now=ProcessInfo.processInfo.systemUptime
+            let age=message.sentAt.map {now-($0-clock.offset)} ?? 0
+            let validClock=timingReady && message.sentAt != nil && age>=(-0.02) && age<1
+            let target=min(Double(manifest.entries[state.index].durationMS)/1000,max(0,state.seconds+(state.playing && validClock ? max(0,age):0)+(state.playing ? manualOffsetMS/1000:0)))
+            let drift=(target-player.linkedPosition)*1000
+            let sameCue=lastRemoteState?.index==state.index && player.currentID==player.tracks[state.index].id
+            let discontinuity=message.positionJump == true || lastRemoteState == nil
+            let smooth=autoAlign && validClock && sameCue && !discontinuity && state.playing && player.playing && !state.crossfading
+            if sameCue {timingDriftMS=drift}
+            if !validClock {timingStatus="Unstable link"}
+            else if abs(drift)>250 && smooth {timingStatus="Large offset · Align Now required"}
+            else {timingStatus=abs(drift)<=15 ? "Synced":smooth ? "Correcting":"Offset detected"}
+            let adjusted=BackupPlayState(index:state.index,seconds:target,playing:state.playing,crossfading:state.crossfading)
+            player.followLinkedPlayback(adjusted,allowPositionJump:!autoAlign || !sameCue || discontinuity || !state.playing)
+            if smooth,abs(drift)<=250 {
+                player.correctLinkedRate(errorSeconds:drift/1000)
+            }else {player.resetLinkedRate()}
+            lastRemoteState=state;lastRemoteAt=now
+            if peerSupportsTiming {send("clock-report",probe:.init(id:UUID(),sent:now,driftMS:sameCue ? drift:nil,status:timingStatus))}
         }
     }
-    private func drop(_ message:String) {disablePlayback("Link lost · local audio continues independently.",notify:false);peerSupportsPlayback=false;cancelSync(message:"Connection closed. No pending sync will be applied.",notify:false);peerSupportsSync=false;connection?.stateUpdateHandler=nil;connection?.cancel();connection=nil;timer?.invalidate();timer=nil;connected=false;remote=nil;incoming.removeAll();issues=[];peerName="";status=message}
+    func alignNow() {
+        guard role == .backup,linkedPlayback,timingReady,let state=lastRemoteState,let player=source,player.acceptsLinkedPlayback else {return}
+        let age=ProcessInfo.processInfo.systemUptime-lastRemoteAt
+        guard age<2 else {return}
+        player.resetLinkedRate()
+        player.followLinkedPlayback(.init(index:state.index,seconds:max(0,state.seconds+(state.playing ? age:0)+manualOffsetMS/1000),playing:state.playing,crossfading:state.crossfading))
+    }
+    private func drop(_ message:String) {
+        peerSupportsTiming=false;clock=SyncClockEstimate();pendingProbes=[:];timingRTT=0;timingJitter=0;timingStatus="Not measured"
+disablePlayback("Link lost · local audio continues independently.",notify:false);peerSupportsPlayback=false;cancelSync(message:"Connection closed. No pending sync will be applied.",notify:false);peerSupportsSync=false;connection?.stateUpdateHandler=nil;connection?.cancel();connection=nil;timer?.invalidate();timer=nil;connected=false;remote=nil;incoming.removeAll();issues=[];peerName="";status=message}
     func shutdownPlayer() {disconnect();source?.pause()}
     func disconnect() {epoch=UUID();drop("Disconnected");listener?.cancel();listener=nil;browser?.cancel();browser=nil;peers=[];code="";listening=false}
 }

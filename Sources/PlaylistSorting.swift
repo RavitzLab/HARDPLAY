@@ -12,7 +12,7 @@ struct PlaylistSortMenu:View {
     @ObservedObject private var lock=ControlLock.shared
     var body:some View {
         Menu {ForEach(PlaylistSort.allCases,id:\.self) {order in Button(order.rawValue) {player.sortQueue(order)}}} label:{Image(systemName:"arrow.up.arrow.down").font(.system(size:17,weight:.medium)).frame(width:30,height:30)}
-            .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Sort Playlist")
+            .menuStyle(.borderlessButton).stageMenuInk().fixedSize().accessibilityLabel("Sort Playlist")
             .stageHint("Sort the queue · Undo restores the previous order")
             .disabled(setup.editsBlocked || lock.isLocked || player.tracks.count<2)
     }

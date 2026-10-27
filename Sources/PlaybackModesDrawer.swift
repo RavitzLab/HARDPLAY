@@ -42,7 +42,7 @@ struct PlaybackModesDrawer:View {
                         }
                     }
                     VStack(alignment:.leading,spacing:8) {
-                        Text("Crossfade · \(player.queueNumber(transitionTrack)) → next").font(.stage(size:11)).foregroundStyle(.secondary)
+                        Text("Crossfade · \(player.queueNumber(transitionTrack)) → next").font(.stage(size:11)).stageSecondary()
                         HStack(spacing:6) {ForEach(FadeMode.allCases,id:\.self) {mode in
                             choice(mode == .none ? "Off":"\(String(format:"%g",mode.seconds)) s",icon:mode == .none ? "arrow.right.to.line":"circle.lefthalf.filled",active:transitionTrack.map {player.fadeMode(after:$0)==mode} ?? false,hint:mode == .none ? "This transition · no overlap":"This transition · overlap for \(String(format:"%g",mode.seconds)) seconds") {if let track=transitionTrack {player.setFadeMode(mode,after:track)}}
                         }}.disabled(transitionTrack == nil)
@@ -57,7 +57,7 @@ struct PlaybackModesDrawer:View {
         }.padding(14).background(Color(stageHex:appearance.theme.isLight ? "FFFFFF":"242B34"),in:RoundedRectangle(cornerRadius:12))
             .overlay(RoundedRectangle(cornerRadius:12).stroke(accent.opacity(0.22),lineWidth:1)).foregroundStyle(Color(stageHex:appearance.theme.text))
     }
-    private func group<Content:View>(_ title:String,@ViewBuilder content:()->Content)->some View {VStack(alignment:.leading,spacing:8) {Text(title).font(.stage(size:11)).foregroundStyle(.secondary);HStack(spacing:6,content:content)}}
+    private func group<Content:View>(_ title:String,@ViewBuilder content:()->Content)->some View {VStack(alignment:.leading,spacing:8) {Text(title).font(.stage(size:11)).stageSecondary();HStack(spacing:6,content:content)}}
     private func choice(_ title:String,icon:String,active:Bool,hint:String,action:@escaping ()->Void)->some View {
         Button {guard !blocked else{return};action()} label:{VStack(spacing:6) {Image(systemName:icon).font(.system(size:15,weight:.medium));Text(title).font(.stage(size:11))}.frame(maxWidth:.infinity).padding(.vertical,10)}.buttonStyle(PlayerControlStyle(active:active)).disabled(blocked).accessibilityLabel("\(title) mode").accessibilityValue(active ? "Selected":"Not selected").stageHint(hint)
     }

@@ -11,6 +11,7 @@ enum AudioRoute:String {case main,preview}
 private final class RoutedPlayer {
     weak var player:AVPlayer?
     let role:AudioRoute
+    var observation:NSKeyValueObservation?
     init(_ player:AVPlayer,_ role:AudioRoute){self.player=player;self.role=role}
 }
 final class AudioRouting:ObservableObject {
@@ -46,13 +47,20 @@ final class AudioRouting:ObservableObject {
     func available(_ role:AudioRoute)->Bool {resolved(role) != nil}
     func register(_ player:AVPlayer,role:AudioRoute) {
         players.removeAll {$0.player == nil || $0.player === player}
-        players.append(RoutedPlayer(player,role));apply(player,role)
+        let routed=RoutedPlayer(player,role)
+        routed.observation=player.observe(\.currentItem,options:[.new]) {[weak self,weak player] _,_ in
+            DispatchQueue.main.async {guard let self,let player else {return};player.currentItem?.audioTimePitchAlgorithm=self.quality(role).algorithm}
+        }
+        players.append(routed);apply(player,role)
     }
     private func changed(_ role:AudioRoute) {
         defaults.set(uid(role),forKey:role == .main ? "audio.mainOutput":"audio.previewOutput")
         applyAll()
     }
+    func quality(_ role:AudioRoute)->AudioProcessingQuality {AudioProcessingQuality(rawValue:defaults.string(forKey:"audio.quality."+role.rawValue) ?? "") ?? .balanced}
+    func setQuality(_ value:AudioProcessingQuality,role:AudioRoute) {defaults.set(value.rawValue,forKey:"audio.quality."+role.rawValue);objectWillChange.send();applyAll()}
     private func apply(_ player:AVPlayer,_ role:AudioRoute) {
+        player.currentItem?.audioTimePitchAlgorithm=quality(role).algorithm
         // A missing explicitly selected device must not leak preview audio into the default PA output.
         player.isMuted = !available(role)
         player.audioOutputDeviceUniqueID=uid(role).isEmpty ? nil:uid(role)

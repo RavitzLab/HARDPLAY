@@ -19,6 +19,7 @@ extension View {
     func mapAction(_ action:String) -> some View { modifier(MappingTarget(action:.init(rawValue:action))) }
 }
 struct MappingView: View {
+    @ObservedObject private var conceptAppearance=AppearancePreferences.shared
     var embedded=false
     @ObservedObject var mappings = ControlMappings.shared
     @ObservedObject var player = Player.shared
@@ -30,8 +31,8 @@ struct MappingView: View {
             HStack {
                 Text("Keyboard / MIDI").font(.stage(size:18,weight:.semibold))
                 Spacer()
-                Button { AppDelegate.shared.minimize(AppDelegate.shared.mappingWindow) } label: { MarkerIcon(systemName:"minus").frame(width:28,height:28) }
-                    .buttonStyle(PlayerControlStyle()).accessibilityLabel("Minimize Mapping Window").stageHint("Minimize · restore from menu bar").disabled(lock.isLocked)
+                if !embedded {Button { AppDelegate.shared.minimize(AppDelegate.shared.mappingWindow) } label: { MarkerIcon(systemName:"minus").frame(width:28,height:28) }
+                    .buttonStyle(PlayerControlStyle()).accessibilityLabel("Minimize Mapping Window").stageHint("Minimize · restore from menu bar").disabled(lock.isLocked)}
                 Toggle("Map",isOn:$mappings.mapping).toggleStyle(.button).tint(accent).disabled(setup.settingsBlocked)
                 Button { if setup.settingsBlocked { setup.unlock() } else { mappings.mapping = false; setup.lockSettings() } } label: { MarkerIcon(systemName:setup.settingsBlocked ? "lock.fill":"lock.open").frame(width:30,height:30) }
                     .buttonStyle(PlayerControlStyle(active:setup.settingsBlocked)).accessibilityLabel(setup.settingsBlocked ? "Unlock Settings":"Lock Settings").stageHint(setup.settingsBlocked ? "Unlock settings and mappings":"Protect settings and mappings")
@@ -44,22 +45,22 @@ struct MappingView: View {
                 } label: { MarkerLabel(mappings.setName,systemImage:"folder").lineLimit(1) }.fixedSize().disabled(setup.settingsBlocked)
             }
             Text(mappings.mapping ? "Select an action here or click a highlighted player button. Then press your key or MIDI button. Esc cancels learning." : "Mappings are active. Enable Map to change assignments.")
-                .font(.stage(size:11)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
+                .font(.stage(size:11)).stageSecondary().fixedSize(horizontal:false,vertical:true)
             ScrollView {
                 LazyVStack(spacing:6) {
                     ForEach(actions) { action in mappingRow(action) }
                 }
             }
-            Text("Trigger = run once · Toggle = first press On, second press Off").font(.stage(size:10)).foregroundStyle(.secondary)
+            Text("Trigger = run once · Toggle = first press On, second press Off").font(.stage(size:10)).stageSecondary()
             Text(mappings.message).font(.stage(size:11)).foregroundStyle(accent).fixedSize(horizontal:false,vertical:true)
             Divider()
             HStack { Text("MIDI Inputs").font(.stage(size:12,weight:.semibold)); Spacer(); Button("Refresh") { mappings.refreshMIDI() }.font(.stage(size:11)).disabled(setup.settingsBlocked) }
             Text(mappings.devices.isEmpty ? "No MIDI inputs connected" : mappings.devices.joined(separator:" · "))
-                .font(.stage(size:11)).foregroundStyle(.secondary).lineLimit(3)
+                .font(.stage(size:11)).stageSecondary().lineLimit(3)
             Text("MIDI buttons: Note / CC. Master Volume: continuous CC fader. Single keys: inside HARDPLAY. Global shortcuts registered: \(mappings.globalCount). ⌥⌘ Space and standard ⌘ shortcuts stay reserved.")
-                .font(.stage(size:10)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
-        }.padding(18).frame(minWidth:500,minHeight:embedded ? 300:500).fixedControlHints(enabled:!embedded)
-            .preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).foregroundStyle(Color(stageHex:AppearancePreferences.shared.theme.text))
+                .font(.stage(size:10)).stageSecondary().fixedSize(horizontal:false,vertical:true)
+        }.padding(18).frame(minWidth:embedded ? 420:500,minHeight:embedded ? 300:500).fixedControlHints(enabled:!embedded)
+            .stageColorScheme().font(.stage(.body)).foregroundStyle(Color(stageHex:AppearancePreferences.shared.theme.text))
             .onChange(of:setup.settingsBlocked) { _, blocked in if blocked { mappings.mapping = false } }
             .disabled(lock.isLocked).overlay { if lock.isLocked { UnlockShield() } }
     }
@@ -70,7 +71,7 @@ struct MappingView: View {
                 VStack(spacing:4) {
                     Button { mappings.learn(action,input:input) } label: {
                         VStack(spacing:3) {
-                            Text(input.rawValue).font(.stage(size:9)).foregroundStyle(.secondary)
+                            Text(input.rawValue).font(.stage(size:9)).stageSecondary()
                             Text(action.rawValue == "volume" && input == .keyboard ? "MIDI CC" : mappings.selected == action && mappings.input == input ? "Listening…" : mappings.label(action,input:input)).font(.stage(size:11)).lineLimit(1)
                         }.frame(width:105,height:34)
                     }.buttonStyle(PlayerControlStyle(active:mappings.selected == action && mappings.input == input))
@@ -84,7 +85,7 @@ struct MappingView: View {
     }
     @ViewBuilder private func behaviorControl(_ action:MappedAction,input:MappingInput) -> some View {
         if action.rawValue == "volume" {
-            Text("Continuous CC").font(.stage(size:10)).foregroundStyle(.secondary)
+            Text("Continuous CC").font(.stage(size:10)).stageSecondary()
         } else if action.supportsToggle {
             Menu {
                 ForEach(ButtonBehavior.allCases,id:\.self) { behavior in
@@ -95,11 +96,11 @@ struct MappingView: View {
                 }
             } label: {
                 Text(behaviorLabel(action,input:input)).font(.stage(size:10))
-            }.menuStyle(.borderlessButton).fixedSize()
+            }.menuStyle(.borderlessButton).stageMenuInk().fixedSize()
                 .disabled(setup.settingsBlocked || !mappings.hasBinding(action,input:input))
                 .accessibilityLabel("\(action.title) \(input.rawValue) behavior: \(behaviorLabel(action,input:input))")
         } else {
-            Text("Trigger").font(.stage(size:10)).foregroundStyle(.secondary)
+            Text("Trigger").font(.stage(size:10)).stageSecondary()
         }
     }
 

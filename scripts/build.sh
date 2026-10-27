@@ -18,8 +18,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.hardplay.player</string>
 <key>CFBundleName</key><string>Hard Play</string>
 <key>CFBundleDisplayName</key><string>Hard Play</string>
-<key>CFBundleVersion</key><string>82</string>
-<key>CFBundleShortVersionString</key><string>0.36.2</string>
+<key>CFBundleVersion</key><string>105</string>
+<key>CFBundleShortVersionString</key><string>0.44.0</string>
+<key>CFBundleGetInfoString</key><string>HARDPLAY Beta 5 (0.44.0)</string>
+<key>HardPlayReleaseTitle</key><string>HARDPLAY Beta 5</string>
+<key>HardPlayReleaseTag</key><string>v0.44.0-beta.5</string>
+<key>HardPlayPrerelease</key><true/>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
 <key>CFBundleLocalizations</key><array><string>en</string></array>
 <key>UTExportedTypeDeclarations</key><array><dict><key>UTTypeIdentifier</key><string>local.hardplay.playlist</string><key>UTTypeDescription</key><string>HARDPLAY Playlist</string><key>UTTypeConformsTo</key><array><string>public.json</string></array><key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>hardplay</string></array><key>public.mime-type</key><string>application/vnd.hardplay.playlist+json</string></dict></dict></array>
@@ -32,11 +36,19 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleDocumentTypes</key><array><dict><key>CFBundleTypeName</key><string>HARDPLAY Playlist</string><key>CFBundleTypeRole</key><string>Editor</string><key>LSHandlerRank</key><string>Owner</string><key>LSItemContentTypes</key><array><string>local.hardplay.playlist</string></array></dict><dict><key>CFBundleTypeName</key><string>Audio</string><key>CFBundleTypeRole</key><string>Viewer</string><key>LSHandlerRank</key><string>Alternate</string><key>LSItemContentTypes</key><array><string>public.audio</string><string>public.movie</string></array></dict></array>
 </dict></plist>
 PLIST
+rm -f "$APP/Contents/Resources/HardPlayHorizontal.png"
 cp assets/branding/hardplay-wordmark-source.png "$APP/Contents/Resources/HardPlayWordmark.png"
 cp assets/fonts/BalsamiqSans-Bold.ttf "$APP/Contents/Resources/"
 cp assets/fonts/BalsamiqSans-OFL.txt "$APP/Contents/Resources/"
 cp assets/fonts/PermanentMarker-Regular.ttf "$APP/Contents/Resources/"
 cp assets/fonts/PermanentMarker-LICENSE.txt "$APP/Contents/Resources/"
+python3 - "$APP/Contents/Resources" <<'PYFONTS'
+from pathlib import Path
+import sys
+for p in Path(sys.argv[1]).glob('HP-*'):
+    if p.is_file(): p.unlink()
+PYFONTS
+cp assets/fonts/Hardplay*.ttf assets/fonts/Hardplay*-OFL.txt assets/fonts/Hardplay-fonts.json "$APP/Contents/Resources/"
 rm -f "$APP/Contents/Resources/RedKeycap.png" "$APP/Contents/Resources/HardPlayButton.png"
 rm -f "$APP/Contents/Resources/HardPlayIcon.icns" "$APP/Contents/Resources/AppIcon.icns" "$APP/Contents/Resources/HardPlayBeams.png"
 "$APP/Contents/MacOS/HARDPLAY" --render-brand-icon "$PWD/build/icon.png"
@@ -60,4 +72,6 @@ codesign --force --sign - "$APP"
 "$APP/Contents/MacOS/HARDPLAY" --self-test
 "$APP/Contents/MacOS/HARDPLAY" --queue-test
 "$APP/Contents/MacOS/HARDPLAY" --style-check
+"$APP/Contents/MacOS/HARDPLAY" --fixed-layout-test
+"$APP/Contents/MacOS/HARDPLAY" --dj-check
 print "Built: $APP"

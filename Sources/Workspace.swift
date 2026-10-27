@@ -152,7 +152,7 @@ struct WindowDestinationSettings:View {
                         ForEach(WindowDestination.allCases) {Text($0.title).tag($0)}
                     }
                 }
-                Text("Nearby panels follow the player. Independent panels keep their own position. Right-click a panel button for a one-time choice.").font(.stage(size:11)).foregroundStyle(.secondary)
+                Text("Nearby panels follow the player. Independent panels keep their own position. Right-click a panel button for a one-time choice.").font(.stage(size:11)).stageSecondary()
             }.padding(.top,10)
         }
     }
@@ -180,13 +180,10 @@ struct UtilityNavigationView<Content:View>:View {
         VStack(spacing:0) {
             HStack {
                 Button {AppDelegate.shared.returnToPlayer()} label: {
-                    HStack(spacing:8) {
-                        MarkerIcon(systemName:"arrow.left")
-                        Text("Back to Player").font(.stage(size:14))
-                    }.padding(.horizontal,12).frame(minHeight:34)
-                }.buttonStyle(PlayerControlStyle()).accessibilityLabel("Back to Player")
+                    MarkerIcon(systemName:"arrow.left",size:18).frame(width:36,height:34)
+                }.buttonStyle(PlayerControlStyle()).accessibilityLabel("Back").stageHint("Back to player")
                 Spacer(minLength:0)
-            }.padding(.horizontal,20).padding(.vertical,12)
+            }.overlay {SuppliedHardPlayWordmark().frame(width:62,height:34).allowsHitTesting(false)}.padding(.horizontal,20).padding(.vertical,12)
             Divider()
             content.frame(maxWidth:.infinity,maxHeight:.infinity)
         }.background(ThemedBackdrop()).foregroundStyle(Color(stageHex:appearance.theme.text))

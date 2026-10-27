@@ -14,6 +14,14 @@ private func linkedWave(_ marker:UInt16)->Data {
         for _ in 0..<300 {if condition(){return};try await Task.sleep(for:.milliseconds(30))}
         throw BackupFailure("Linked Playback timeout: "+label)
     }
+    var clock=SyncClockEstimate()
+    for i in 0..<8 {let t=Double(i);clock.add(SyncClockSample(sent:t,received:t+10.01,replied:t+10.012,arrived:t+0.022)!)}
+    precondition(abs(clock.offset-10)<0.000001 && abs(clock.rtt-0.02)<0.000001 && clock.ready(at:7.1))
+    clock.add(SyncClockSample(sent:8,received:18.5,replied:18.502,arrived:9.002)!)
+    precondition(abs(clock.offset-10)<0.000001 && !clock.ready(at:9.1) && !clock.ready(at:20))
+    precondition(SyncClockSample(sent:3,received:1,replied:0,arrived:4)==nil)
+    precondition(SyncClockSample(sent:.nan,received:1,replied:1,arrived:2)==nil)
+    print("PASS: monotonic clock offset, RTT, jitter outlier and stale measurement guards")
     let fm=FileManager.default,folder=URL(fileURLWithPath:NSTemporaryDirectory()).appendingPathComponent("hardplay-linked-\(UUID())")
     try fm.createDirectory(at:folder,withIntermediateDirectories:true);defer {try? fm.removeItem(at:folder)}
     let a1=folder.appendingPathComponent("A-1.wav"),a2=folder.appendingPathComponent("A-2.wav"),b1=folder.appendingPathComponent("B-1.wav"),b2=folder.appendingPathComponent("B-2.wav")
@@ -30,6 +38,8 @@ private func linkedWave(_ marker:UInt16)->Data {
     try la.host(.primary,advertise:false);try await wait("listen") {la.port != nil}
     lb.connect(.hostPort(host:"127.0.0.1",port:la.port!),code:la.code,role:.backup)
     try await wait("pair") {la.connected && lb.connected && la.peerSupportsPlayback && lb.peerSupportsPlayback}
+    try await wait("network timing measured") {la.timingReady && lb.timingReady}
+    precondition(la.timingRTT>0 && lb.timingRTT>0)
     // Synchronization alone must retain the default independent playback behavior.
     la.beginSync(.send);try await wait("review") {la.syncReview?.plan.ready == true};la.applySync()
     try await wait("sets ready") {la.verified && lb.verified && a.canSynchronizeSet && b.canSynchronizeSet && !la.syncing && !lb.syncing}
@@ -44,6 +54,17 @@ private func linkedWave(_ marker:UInt16)->Data {
     lb.setPlaybackLinked(true);try await wait("both armed") {la.linkedPlayback && lb.linkedPlayback}
     a.toggle();try await wait("Play on A starts both") {a.playing && b.playing && a.elapsed>0.3 && b.elapsed>0.1}
     precondition(abs(a.elapsed-b.elapsed)<0.75)
+    lb.autoAlign=true
+    try await wait("live position measurements") {lb.timingDriftMS != nil && la.timingDriftMS != nil}
+    precondition(lb.timingDriftMS!.isFinite)
+    let position=b.elapsed
+    b.followLinkedPlayback(.init(index:b.tracks.firstIndex(where:{$0.id==b.currentID})!,seconds:position+1,playing:true,crossfading:false),allowPositionJump:false)
+    precondition(abs(b.elapsed-position)<0.15)
+    b.correctLinkedRate(errorSeconds:0.1)
+    precondition(b.crossfadeDiagnostics.incomingRate>1 && b.crossfadeDiagnostics.incomingRate<=1.0051)
+    b.resetLinkedRate();precondition(b.crossfadeDiagnostics.incomingRate==1)
+    print("PASS: Auto Align bounds rate correction and never seeks a large offset")
+    lb.manualOffsetMS=999;precondition(lb.manualOffsetMS==250);lb.manualOffsetMS=0
     b.toggle();try await wait("Pause on B pauses both") {!a.playing && !b.playing}
     b.toggle();try await wait("Play on B starts both") {a.playing && b.playing}
     b.seek(4);try await wait("seek follows") {a.elapsed>=4 && b.elapsed>=3.7}
@@ -74,7 +95,7 @@ private func linkedWave(_ marker:UInt16)->Data {
     la.setPlaybackLinked(true);lb.setPlaybackLinked(true);try await wait("final arm") {la.linkedPlayback && lb.linkedPlayback}
     a.toggle();try await wait("playing before disconnect") {a.playing && b.playing}
     lb.disconnect();try await wait("disconnect disables") {!la.connected && !la.linkedPlayback && !lb.linkedPlayback}
-    precondition(a.playing && b.playing && !b.linkedFollower)
+    precondition(a.playing && b.playing && !b.linkedFollower && !lb.autoAlign && !lb.timingReady && lb.timingDriftMS==nil)
     // Normal exit must sever the link before pausing the local engine.
     func rearm() async throws {
         a.pause();b.pause();try la.host(.primary,advertise:false);try await wait("exit-test listener") {la.port != nil}

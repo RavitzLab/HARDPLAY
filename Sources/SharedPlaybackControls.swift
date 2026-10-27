@@ -11,7 +11,7 @@ struct RepeatControl:View {
     var body:some View {
         Button {let modes=RepeatMode.allCases;player.setRepeat(modes[(modes.firstIndex(of:player.repeatMode)!+1)%modes.count])} label:{
             if compact {
-                VStack(spacing:2) {Image(systemName:player.repeatOne ? "repeat.1":"repeat").font(.system(size:small ? 13:17));Text(player.repeatOne ? "1":caption.uppercased()).font(.system(size:7,weight:.bold))}.frame(width:small ? 28:38,height:small ? 28:38)
+                VStack(spacing:2) {Image(systemName:player.repeatOne ? "repeat.1":"repeat").font(.system(size:small ? 13:17));Text(player.repeatOne ? "1":caption.uppercased()).font(.system(size:7,weight:.bold))}.frame(width:small ? 32:48,height:small ? 32:38)
             }else {
                 HStack(spacing:6) {Image(systemName:player.repeatOne ? "repeat.1":"repeat");Text("Repeat · "+caption).font(.stage(size:11))}.padding(.horizontal,9).frame(height:34)
             }
@@ -37,7 +37,7 @@ struct ShuffleControl:View {
     @ObservedObject private var setup=SetupLock.shared
     @ObservedObject private var lock=ControlLock.shared
     var body:some View {
-        Button {guard !setup.settingsBlocked,!lock.isLocked else {return};if !player.shuffle {if player.repeatOne {player.setRepeat(.off)};player.endMode = .next};player.shuffle.toggle()} label:{Image(systemName:"shuffle").font(.system(size:small ? 14:17,weight:.medium)).frame(width:small ? 28:36,height:small ? 32:38)}
+        Button {guard !setup.settingsBlocked,!lock.isLocked else {return};if !player.shuffle {if player.repeatOne {player.setRepeat(.off)};player.endMode = .next};player.shuffle.toggle()} label:{Image(systemName:"shuffle").font(.system(size:small ? 14:17,weight:.medium)).frame(width:small ? 32:48,height:small ? 32:38)}
             .buttonStyle(PlayerControlStyle(active:player.shuffle)).accessibilityLabel("Shuffle")
             .accessibilityValue(player.shuffle ? "On":"Off").stageHint("Shuffle · choose random tracks continuously")
             .disabled(setup.settingsBlocked || lock.isLocked)

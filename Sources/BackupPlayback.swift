@@ -26,7 +26,9 @@ struct BackupPlayMessage:Codable {
     var fingerprint:String? = nil
     var action:BackupPlayAction? = nil
     var state:BackupPlayState? = nil
-    var valid:Bool {(fingerprint.map {$0.count == 64 && $0.allSatisfy {"0123456789abcdef".contains($0)}} ?? true) && (action?.valid ?? true) && (state?.valid ?? true)}
+    var sentAt:Double? = nil
+    var positionJump:Bool? = nil
+    var valid:Bool {(sentAt.map {$0.isFinite && $0>=0} ?? true) && (fingerprint.map {$0.count == 64 && $0.allSatisfy {"0123456789abcdef".contains($0)}} ?? true) && (action?.valid ?? true) && (state?.valid ?? true)}
 }
 extension BackupSetInput {
     // Runtime positions and selection change during playback. One-shot start points are consumed by playback.

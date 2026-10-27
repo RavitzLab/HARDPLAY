@@ -92,6 +92,7 @@ final class Player: ObservableObject {
     var linkedAction:((BackupPlayAction)->Bool)?
     var linkedStateDidChange:(()->Void)?
     var linkedFollower=false {didSet {if !linkedFollower {linkedPendingTrackID=nil};configureEndBoundary()}}
+    private var linkedRateGeneration=0
     private var linkedPendingTrackID:String?
     private var applyingLinkedState=false
     private var positions: [String: Double] = [:]
@@ -516,9 +517,10 @@ final class Player: ObservableObject {
         persist()
     }
     var acceptsLinkedPlayback:Bool {!setupLock.playbackBlocked && !setupLock.selectionBlocked && !ControlLock.shared.isLocked}
+    var linkedPosition:Double {let value=engine.currentTime().seconds;return value.isFinite ? max(0,value):elapsed}
     var linkedPlaybackState:BackupPlayState? {
         guard !isLoading,error == nil,let index=tracks.firstIndex(where:{$0.id == currentID}) else {return nil}
-        return .init(index:index,seconds:elapsed,playing:playing,crossfading:isCrossfading)
+        return .init(index:index,seconds:linkedPosition,playing:playing,crossfading:isCrossfading)
     }
     func performLinkedAction(_ action:BackupPlayAction) {
         guard acceptsLinkedPlayback,action.valid else {return}
@@ -533,7 +535,16 @@ final class Player: ObservableObject {
         default:break
         }
     }
-    func followLinkedPlayback(_ state:BackupPlayState) {
+    func resetLinkedRate() {if engine.rate>0 {engine.rate=1};if let outgoing,outgoing.rate>0 {outgoing.rate=1}}
+    func correctLinkedRate(errorSeconds:Double) {
+        guard linkedFollower,playing,!isCrossfading,errorSeconds.isFinite else {resetLinkedRate();return}
+        let rate:Float=abs(errorSeconds)<0.012 ? 1:Float(1+min(0.005,max(-0.005,errorSeconds*0.08)))
+        engine.rate=rate
+        // A stale or lost measurement must never leave a player running at a modified rate.
+        linkedRateGeneration += 1;let generation=linkedRateGeneration
+        DispatchQueue.main.asyncAfter(deadline:.now()+1.2) {[weak self] in guard let self,self.linkedRateGeneration==generation else {return};self.resetLinkedRate()}
+    }
+    func followLinkedPlayback(_ state:BackupPlayState,allowPositionJump:Bool=true) {
         guard acceptsLinkedPlayback,state.valid,tracks.indices.contains(state.index) else {return}
         applyingLinkedState=true;defer {applyingLinkedState=false}
         let track=tracks[state.index]
@@ -548,7 +559,7 @@ final class Player: ObservableObject {
         guard !isLoading else {return}
         linkedPendingTrackID=nil
         if !state.crossfading && isCrossfading {cancelCrossfade()}
-        if abs(elapsed-state.seconds)>0.35 || (!state.playing && abs(elapsed-state.seconds)>0.03) {
+        if allowPositionJump && (abs(elapsed-state.seconds)>0.35 || (!state.playing && abs(elapsed-state.seconds)>0.03)) {
             elapsed=min(max(0,state.seconds),max(0,duration-1/600))
             engine.seek(to:CMTime(seconds:elapsed,preferredTimescale:600),toleranceBefore:.zero,toleranceAfter:.zero)
         }
@@ -741,6 +752,7 @@ final class Player: ObservableObject {
         (outgoing?.rate ?? 0, engine.rate, outgoing?.volume ?? 0, engine.volume, fadeLength)
     }
     func load(_ track: Track, autoplay: Bool = true, position: Double? = nil, precisePosition:Bool = false, ignoreStartPoint:Bool = false) {
+        if autoplay {AppDelegate.shared?.stopDJForPlayer()}
         rememberPosition()
         cancelCrossfade()
         if !ignoreStartPoint,!autoplay,startPoint(for:track) != nil {armedStartPoints.insert(track.id)}
@@ -796,6 +808,7 @@ final class Player: ObservableObject {
         persist()
     }
     func toggle() {
+        AppDelegate.shared?.stopDJForPlayer()
         guard !setupLock.playbackBlocked else { return }
         if !applyingLinkedState {
             let action:BackupPlayAction
@@ -1069,9 +1082,10 @@ struct GlassBackdrop: NSViewRepresentable {
 }
 
 enum ControlOutline: Shape {
-    case circle, rounded, capsule, hardware, tape
+    case circle, rounded, capsule, hardware, tape, square
     func path(in rect: CGRect) -> Path {
         switch self {
+        case .square:return RoundedRectangle(cornerRadius:2).path(in:rect)
         case .circle: return Circle().path(in: rect)
         case .rounded: return RoundedRectangle(cornerRadius:8).path(in:rect)
         case .capsule: return Capsule().path(in: rect)
@@ -1081,6 +1095,16 @@ enum ControlOutline: Shape {
     }
 }
 
+final class ControlHoverState:ObservableObject {@Published var hovering=false}
+struct ConceptControlHover:ViewModifier {
+    let outline:ControlOutline
+    let enabled:Bool
+    @StateObject private var state=ControlHoverState()
+    func body(content:Content)->some View {
+        content.overlay(outline.stroke(accent.opacity(enabled && state.hovering ? 0.5:0),lineWidth:0.8).allowsHitTesting(false))
+            .onHover {value in if state.hovering != (value && enabled) {state.hovering=value && enabled}}
+    }
+}
 struct PlayerControlStyle: ButtonStyle {
     @ObservedObject var appearance = AppearancePreferences.shared
     var outline: ControlOutline = .rounded
@@ -1088,6 +1112,8 @@ struct PlayerControlStyle: ButtonStyle {
     var primary = false
     @Environment(\.isEnabled) private var enabled
     private var surface:ControlOutline {
+        if case .rounded=outline,appearance.theme.preset == "Noir Vinyl" {return .capsule}
+        if case .rounded=outline,appearance.theme.isConcept {return ["Modular Grid","Brutalist Play","Rave Terminal"].contains(appearance.theme.preset) ? .square:appearance.theme.preset == "Shadow System" ? .rounded:.hardware}
         if case .rounded=outline,appearance.theme.preset == "Crew Tape" {return .tape}
         if case .rounded=outline,["Road Case","Flightcase","Speaker Grille","FOH","Stage Crew","Stagehand"].contains(appearance.theme.preset) {return .hardware}
         return outline
@@ -1098,12 +1124,12 @@ struct PlayerControlStyle: ButtonStyle {
         return configuration.label
             .foregroundStyle((taped ? tapeInk:Color(stageHex:appearance.theme.text)).opacity(enabled ? 0.94:0.52))
             .background {
-                surface.fill(taped ? tapeB:Color(stageHex:appearance.theme.background))
+                surface.fill(appearance.theme.paint(taped ? .tape:.surface))
                     .overlay(surface.fill(lit ? accent.opacity(pressed ? 0.20:0.13):Color(stageHex:appearance.theme.text).opacity(pressed ? 0.075:0.035)))
             }
-            .overlay(surface.stroke(lit ? accent.opacity(0.38):Color(stageHex:appearance.theme.text).opacity(0.11),lineWidth:0.8))
+            .overlay(surface.stroke(lit ? accent.opacity(0.38):Color(stageHex:appearance.theme.isConcept || appearance.theme.grid != nil ? appearance.theme.gridColor:appearance.theme.text).opacity(appearance.theme.isConcept || appearance.theme.grid != nil ? 0.9:0.11),lineWidth:0.8))
             .shadow(color:.black.opacity(0.10),radius:1,y:0.5)
-            .contentShape(surface).opacity(enabled ? 1:0.55)
+            .contentShape(surface).modifier(ConceptControlHover(outline:surface,enabled:appearance.theme.isConcept && enabled)).opacity(enabled ? 1:0.55)
             .scaleEffect(pressed ? 0.99:1)
             .animation(.easeOut(duration:0.12),value:pressed)
     }
@@ -1116,7 +1142,7 @@ struct TransitionControl: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(inQueue ? "Fade →" : "Crossfade")
-                .font(.stage(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                .font(.stage(size: 10, weight: .medium)).stageSecondary()
             Picker("Transition after \(track.title)", selection: Binding(get: { player.fadeMode(after: track) }, set: { player.setFadeMode($0, after: track) })) {
                 ForEach(Array(Set(FadeMode.allCases+[player.fadeMode(after:track)])).sorted {$0.seconds<$1.seconds}, id: \.self) { mode in Text(mode.title).tag(mode) }
             }.pickerStyle(.segmented).labelsHidden().tint(accent)
@@ -1149,6 +1175,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var pocketWindow: NSPanel!
     private let playbackPanel=PlaybackPanelController()
     private let nanoPlaylist=NanoPlaylistController()
+    private var nanoControlsWindow:NSPanel?
+    private weak var nanoControlsOwner:NSWindow?
+    var djWindow:NSWindow?
     private var pocketDrawerWindow:NSPanel?
     private var pocketDrawerPositioning=false
     private var pocketDrawerReturn:(original:NSRect,placed:NSRect)?
@@ -1157,6 +1186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var lockUpdates: AnyCancellable?
     var statusUpdates: AnyCancellable?
     var lastStatusBadge: MenuBarBadge?
+    var lastPreviewBadge:Bool?
     private var statusTracking:NSTrackingArea?
     private var hoverWork:DispatchWorkItem?
     private var hoverOpened=false
@@ -1177,14 +1207,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.target = self; button.action = #selector(statusClick(_:)); button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         popover = NSPopover(); popover.behavior = .transient
-        let menuController=NSHostingController(rootView:MenuBarPlayerView())
+        let menuController=NSHostingController(rootView:MenuBarPlayerView().windowSizeCanvas(.menuBar));menuController.sizingOptions=[]
         menuController.sizingOptions = [.preferredContentSize]
         popover.contentViewController=menuController
-        makeWindows()
+        makeWindows();WindowSizes.shared.applyAll()
         PlaylistWindowState.shared.startInline()
         if WorkspaceState.shared.mode == .single {workspaceModeChanged()}
         appearanceUpdates = AppearancePreferences.shared.objectWillChange.receive(on:RunLoop.main).sink { _ in Player.shared.objectWillChange.send() }
-        statusUpdates = Player.shared.objectWillChange
+        statusUpdates = Publishers.Merge(Player.shared.objectWillChange,MenuPreviewPlayer.shared.objectWillChange)
             .throttle(for:.milliseconds(500),scheduler:RunLoop.main,latest:true)
             .receive(on:RunLoop.main).sink { [weak self] _ in self?.updateStatusItem() }
         lockUpdates = ControlLock.shared.objectWillChange.receive(on:RunLoop.main).sink { [weak self] _ in
@@ -1211,6 +1241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle: "Save Playlist",action:#selector(savePlaylist),keyEquivalent:"s")
         let saveAs = appMenu.addItem(withTitle:"Save Playlist As…",action:#selector(savePlaylistAs),keyEquivalent:"s"); saveAs.keyEquivalentModifierMask = [.command,.shift]
         let open = appMenu.addItem(withTitle:"Open Playlist…",action:#selector(openPlaylist),keyEquivalent:"o"); open.keyEquivalentModifierMask = [.command,.shift]
+        appMenu.addItem(withTitle:"DJ · Two Decks…",action:#selector(showDJ),keyEquivalent:"d")
         appMenu.addItem(withTitle:"PATCH…",action:#selector(showSettingsWindow),keyEquivalent:",")
         appMenu.addItem(withTitle:"Timecode & Backup…",action:#selector(showBackupWindow),keyEquivalent:"")
         appMenu.addItem(withTitle:"Web Viewer…",action:#selector(showWebViewer),keyEquivalent:"")
@@ -1234,7 +1265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mainWindow.title = "Hard Play"; mainWindow.titlebarAppearsTransparent = true
         mainWindow.titleVisibility = .hidden; mainWindow.isMovableByWindowBackground = true
         mainWindow.isReleasedWhenClosed = false; mainWindow.delegate = self
-        mainWindow.contentView = NSHostingView(rootView: PlayerView().padding(.top, 20).background(ThemedBackdrop(playerWindow:"main")).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)))
+        mainWindow.contentView = ProfileHostingView(rootView: PlayerView().background(ThemedBackdrop(playerWindow:"main")).stageColorScheme().font(.stage(.body)).windowSizeCanvas(.main))
         mainWindow.center(); mainWindow.setFrameAutosaveName("HARDPLAY.stage.minimal.minimal.main")
         miniWindow = FloatingPanel(contentRect: NSRect(x: 100, y: 100, width: 380, height: 540), styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel, .fullSizeContentView], backing: .buffered, defer: false)
         miniWindow.isOpaque = false; miniWindow.backgroundColor = .clear
@@ -1244,7 +1275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         miniWindow.isMovableByWindowBackground = true;miniWindow.isMovable = !FloatingPlacement.shared.miniLocked; miniWindow.level = .floating
         miniWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         miniWindow.hidesOnDeactivate = false; miniWindow.isReleasedWhenClosed = false; miniWindow.delegate = self
-        miniWindow.contentView = NSHostingView(rootView: PlayerView(compact: true).padding(.top, 8).background(ThemedBackdrop(playerWindow:"mini")))
+        miniWindow.contentView = ProfileHostingView(rootView: PlayerView(compact: true).padding(.top, 8).background(ThemedBackdrop(playerWindow:"mini")).windowSizeCanvas(.mini))
         miniWindow.contentMinSize=NSSize(width:380,height:320);miniWindow.contentMaxSize=NSSize(width:760,height:1000)
         miniWindow.setFrameAutosaveName("HARDPLAY.stage.minimal.mini")
         playlistWindow = FloatingPanel(contentRect:NSRect(x:160,y:160,width:440,height:480),styleMask:[.titled,.closable,.miniaturizable,.resizable,.nonactivatingPanel],backing:.buffered,defer:false)
@@ -1256,30 +1287,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         playlistWindow.isReleasedWhenClosed = false; playlistWindow.delegate = self
         playlistWindow.isMovableByWindowBackground = true
         playlistWindow.contentMinSize = NSSize(width:380,height:PlaylistPanelLayout.minimumContentHeight(hints:HintPreferences.shared.enabled))
-        playlistWindow.contentView = NSHostingView(rootView:PlayerView(playlistOnly:true).background(ThemedBackdrop()))
+        playlistWindow.contentView = ProfileHostingView(rootView:PlayerView(playlistOnly:true).background(ThemedBackdrop()).windowSizeCanvas(.playlist))
         playlistWindow.setFrameAutosaveName("HARDPLAY.playlist.detached")
         mappingWindow = NSWindow(contentRect:NSRect(x:200,y:180,width:540,height:620),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         mappingWindow.level = .floating
         mappingWindow.title = "Hard Play Keyboard / MIDI"; mappingWindow.isReleasedWhenClosed = false; mappingWindow.delegate = self
         mappingWindow.contentMinSize = NSSize(width:500,height:500)
         mappingWindow.appearance = NSAppearance(named:AppearancePreferences.shared.theme.isLight ? .aqua:.darkAqua)
-        mappingWindow.contentView = NSHostingView(rootView:MappingView().utilityNavigation())
+        mappingWindow.contentView = ProfileHostingView(rootView:MappingView().utilityNavigation().windowSizeCanvas(.mappings))
         mappingWindow.setFrameAutosaveName("HARDPLAY.mappings")
-        pocketWindow = PocketPanel(contentRect:NSRect(x:100,y:100,width:344,height:380),styleMask:[.borderless,.nonactivatingPanel,.resizable],backing:.buffered,defer:false)
+        pocketWindow = PocketPanel(contentRect:NSRect(x:100,y:100,width:384,height:380),styleMask:[.borderless,.nonactivatingPanel,.resizable],backing:.buffered,defer:false)
         pocketWindow.isOpaque=false;pocketWindow.backgroundColor = .clear;pocketWindow.level = .floating
         pocketWindow.title="Hard Play Pocket";pocketWindow.hasShadow=true;pocketWindow.isMovableByWindowBackground=true;pocketWindow.hidesOnDeactivate=false;pocketWindow.isReleasedWhenClosed=false
         pocketWindow.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
-        pocketWindow.contentView=NSHostingView(rootView:PocketPlayerView())
+        pocketWindow.contentView=ProfileHostingView(rootView:PocketPlayerView().windowSizeCanvas(.nano))
         pocketWindow.delegate=self;pocketWindow.isMovable = !FloatingPlacement.shared.pocketLocked
         pocketWindow.setFrameAutosaveName("HARDPLAY.pocket")
-        if !pocketWindow.setFrameUsingName("HARDPLAY.pocket"),let frame=NSScreen.main?.visibleFrame { pocketWindow.setFrameOrigin(NSPoint(x:frame.maxX-360,y:frame.minY+24)) }
-        pocketWindow.minSize=NSSize(width:344,height:380);pocketWindow.maxSize=NSSize(width:560,height:640)
+        if !pocketWindow.setFrameUsingName("HARDPLAY.pocket"),let frame=NSScreen.main?.visibleFrame { pocketWindow.setFrameOrigin(NSPoint(x:frame.maxX-400,y:frame.minY+24)) }
+        pocketWindow.minSize=NSSize(width:384,height:380);pocketWindow.maxSize=NSSize(width:560,height:640)
         let restored=pocketWindow.frame;let limited=PocketPanel.limitedSize(restored.size)
         pocketWindow.setContentSize(limited)
-        settingsWindow = utilityWindow(title:"Hard Play PATCH",width:420,height:680)
-        settingsWindow.contentView = NSHostingView(rootView:PlayerView(settingsOnly:true).padding(20).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).utilityNavigation())
+        settingsWindow = utilityWindow(title:"Hard Play PATCH",width:740,height:720)
+        settingsWindow.contentMinSize=NSSize(width:720,height:540)
+        settingsWindow.contentView = ProfileHostingView(rootView:PlayerView(settingsOnly:true).padding(20).stageColorScheme().font(.stage(.body)).utilityNavigation().windowSizeCanvas(.patch))
         themesWindow = utilityWindow(title:"Hard Play Themes",width:410,height:760)
-        themesWindow.contentView = NSHostingView(rootView:ThemeEditorView().preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).utilityNavigation())
+        themesWindow.contentView = ProfileHostingView(rootView:ThemeEditorView().stageColorScheme().font(.stage(.body)).utilityNavigation().windowSizeCanvas(.themes))
     }
     func showQuickEdit(_ track:Track) {
         guard !SetupLock.shared.editsBlocked,!ControlLock.shared.isLocked else {return}
@@ -1291,7 +1323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let window=quickEditWindow ?? utilityWindow(title:"Hard Play Quick Edit",width:760,height:780)
         window.contentMinSize=NSSize(width:620,height:650)
         if quickEditWindowModel !== model {
-            window.contentView=NSHostingView(rootView:QuickEditView(edit:model).preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).utilityNavigation())
+            window.contentView=ProfileHostingView(rootView:QuickEditView(edit:model).stageColorScheme().font(.stage(.body)).utilityNavigation().windowSizeCanvas(.editor))
             quickEditWindowModel=model
         }
         quickEditWindow=window;restore(window);NSApp.activate(ignoringOtherApps:true)
@@ -1301,7 +1333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !SetupLock.shared.settingsBlocked,!ControlLock.shared.isLocked else {return}
         if viewerWindow == nil {
             viewerWindow=utilityWindow(title:"Hard Play Web Viewer",width:420,height:720)
-            viewerWindow.contentView=NSHostingView(rootView:WebViewerView().preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).utilityNavigation())
+            viewerWindow.contentView=ProfileHostingView(rootView:WebViewerView().stageColorScheme().font(.stage(.body)).utilityNavigation().windowSizeCanvas(.web))
             viewerWindow.contentMinSize=NSSize(width:380,height:500);viewerWindow.center()
         }
         restore(viewerWindow);NSApp.activate(ignoringOtherApps:true)
@@ -1311,7 +1343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !SetupLock.shared.settingsBlocked,!ControlLock.shared.isLocked else {return}
         if backupWindow == nil {
             backupWindow=utilityWindow(title:"Hard Play Timecode & Backup",width:500,height:690)
-            backupWindow.contentView=NSHostingView(rootView:BackupView().preferredColorScheme(AppearancePreferences.shared.theme.isLight ? .light:.dark).font(.stage(.body)).utilityNavigation())
+            backupWindow.contentView=ProfileHostingView(rootView:BackupView().stageColorScheme().font(.stage(.body)).utilityNavigation().windowSizeCanvas(.backup))
             backupWindow.contentMinSize=NSSize(width:440,height:540)
             backupWindow.center()
         }
@@ -1330,11 +1362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspaceWindows.first(where:{workspaceSection(for:$0)==target})?.orderOut(nil)
     }
     func makeRoomForWorkspace() {
-        guard let window=mainWindow,let screen=window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame,!window.styleMask.contains(.fullScreen) else {return}
-        window.contentMinSize=NSSize(width:min(700,screen.width),height:min(650,max(420,screen.height-28)))
-        var frame=EmbeddedPlaylistLayout.fittedFrame(current:window.frame,visible:screen,height:max(window.frame.height,800))
-        frame.size.width=min(screen.width,max(700,frame.width));frame.origin.x=min(max(screen.minX,frame.minX),screen.maxX-frame.width)
-        window.setFrame(frame,display:true)
+        WindowSizes.shared.applyAll()
     }
     func workspaceModeChanged() {
         let workspace=WorkspaceState.shared
@@ -1370,7 +1398,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if let preferred,let i=windows.firstIndex(where:{$0 === preferred}) {windows.insert(windows.remove(at:i),at:0)}
         let frames=WorkspaceLayout.frames(main:main.frame,screen:screen,sizes:windows.map { $0.frame.size })
-        for (window,frame) in zip(windows,frames) where window.frame != frame {window.setFrame(frame,display:true)}
+        for (window,frame) in zip(windows,frames) where window.frame.origin != frame.origin {window.setFrameOrigin(frame.origin)}
     }
     func rememberUtilityOwner() {
         guard WorkspaceState.shared.section == nil,
@@ -1408,6 +1436,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if WorkspaceState.shared.present(.settings) {return}
         guard !ControlLock.shared.isLocked else { return }
         let owner=miniWindow.isVisible ? miniWindow!:mainWindow!
+        let content=settingsWindow.contentRect(forFrameRect:settingsWindow.frame)
+        if content.width<720 {settingsWindow.setContentSize(NSSize(width:740,height:max(620,content.height)))}
+        if let visible=(owner.screen ?? NSScreen.main)?.visibleFrame {
+            var frame=settingsWindow.frame
+            frame.size.width=min(frame.width,visible.width);frame.size.height=min(frame.height,visible.height)
+            frame.origin.x=min(max(visible.minX,frame.minX),visible.maxX-frame.width)
+            frame.origin.y=min(max(visible.minY,frame.minY),visible.maxY-frame.height)
+            settingsWindow.setFrame(frame,display:false)
+        }
         if !settingsWindow.isVisible,WorkspaceState.shared.followsPlayer(.settings) { settingsWindow.setFrameOrigin(NSPoint(x:owner.frame.maxX+12,y:owner.frame.maxY-settingsWindow.frame.height)); settingsWindow.setFrame(settingsWindow.constrainFrameRect(settingsWindow.frame,to:owner.screen),display:true) }
         restore(settingsWindow);NSApp.activate(ignoringOtherApps:true)
     }
@@ -1438,32 +1475,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         else { showMenuBarPlayer() }
     }
     func toggleWideLayout() {
-        guard !ControlLock.shared.isLocked else { return }
-        let screen = mainWindow.screen?.visibleFrame ?? NSScreen.main!.visibleFrame
-        var frame = mainWindow.frame
-        frame.size.width = min(frame.width >= 840 ? 600 : 1040,screen.width)
-        frame.origin.x = min(max(screen.minX,frame.minX),screen.maxX-frame.width)
-        mainWindow.setFrame(frame,display:true,animate:true)
+        guard !ControlLock.shared.isLocked else {return};WindowSizes.shared.wide.toggle()
     }
     func fitMainContent(_ height:CGFloat) {
-        guard WindowPresentation.shared.autoFit,height>0,!ControlLock.shared.isLocked,WorkspaceState.shared.section == nil,
-              let window=mainWindow,!window.styleMask.contains(.fullScreen),
-              let screen=window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {return}
-        let content=height+20+(HintPreferences.shared.enabled ? HintMetrics.totalHeight:0)
-        let chrome=max(0,window.frame.height-window.contentLayoutRect.height)
-        let targetHeight=content+chrome+4
-        let minimum:CGFloat = !PlaylistWindowState.shared.detached && PlaylistWindowState.shared.shown ? 420:320
-        window.contentMinSize=NSSize(width:min(600,screen.width),height:min(minimum,screen.height-28))
-        let frame=EmbeddedPlaylistLayout.fittedFrame(current:window.frame,visible:screen,height:targetHeight,minimumHeight:minimum)
-        if abs(frame.height-window.frame.height)>1 || abs(frame.minY-window.frame.minY)>1 {window.setFrame(frame,display:true)}
+        WindowSizes.shared.applyAll()
     }
     func ensureEmbeddedPlaylistRoom() {
-        if WindowPresentation.shared.autoFit {WindowPresentation.shared.requestFit();return}
-        guard !PlaylistWindowState.shared.detached,let window=mainWindow,!window.styleMask.contains(.fullScreen),
-              let screen=window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {return}
-        window.contentMinSize=NSSize(width:min(600,screen.width),height:min(740,max(620,screen.height-28)))
-        let frame=EmbeddedPlaylistLayout.frame(current:window.frame,visible:screen,tracks:Player.shared.tracks.count)
-        if frame != window.frame {window.setFrame(frame,display:true)}
+        WindowSizes.shared.applyAll()
     }
     enum PlayerSurface {case main,mini,nano,menuBar}
     func toggleNanoPlaylist() {
@@ -1481,6 +1499,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     /// Presentation changes hide existing windows; they never stop playback or discard editor models.
     @discardableResult private func preparePlayerWindow(_ destination:PlayerSurface)->Bool {
+        stopDJForPlayer()
+        hideNanoControls()
         if destination != .nano {hidePocketDrawer(animated:false);nanoPlaylist.hide()}
         let followDock=PlaylistWindowState.shared.edge != nil && playlistWindow?.isVisible == true
         hideUtilityWindows()
@@ -1524,23 +1544,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var miniMeasuredHeight:CGFloat=0
     func measureMiniContent(_ height:CGFloat) {guard height.isFinite,height>0,abs(height-miniMeasuredHeight)>0.5 else {return};miniMeasuredHeight=height;fitMiniPlaylist()}
     func fitMiniPlaylist() {
-        guard let panel=miniWindow,let visible=panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {return}
-        let inline = !PlaylistWindowState.shared.detached && PlaylistWindowState.shared.shown
-        let chrome=max(0,panel.frame.height-panel.contentLayoutRect.height)
-        let height:CGFloat=miniMeasuredHeight>0 ? max(320,miniMeasuredHeight+8+chrome+(HintPreferences.shared.enabled ? HintMetrics.totalHeight:0)+4):(inline ? 640:400)
-        var frame=panel.frame
-        frame.origin.y=frame.maxY-min(height,visible.height);frame.size.height=min(height,visible.height)
-        frame.origin.y=max(visible.minY,frame.origin.y)
-        panel.setFrame(frame,display:true)
+        WindowSizes.shared.applyAll()
     }
     func ensurePlaylistControlsVisible() {
-        guard let panel=playlistWindow,let screen=panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else{return}
-        let chrome=panel.frameRect(forContentRect:NSRect(x:0,y:0,width:380,height:100)).height-100
-        let contentHeight=min(PlaylistPanelLayout.minimumContentHeight(hints:HintPreferences.shared.enabled),max(200,screen.height-chrome))
-        panel.contentMinSize=NSSize(width:min(380,screen.width),height:contentHeight)
-        let minimum=panel.frameRect(forContentRect:NSRect(origin:.zero,size:panel.contentMinSize)).size
-        let fitted=PlaylistPanelLayout.fittedFrame(current:panel.frame,visible:screen,minimum:minimum)
-        if fitted != panel.frame {panel.setFrame(fitted,display:true)}
+        WindowSizes.shared.applyAll()
     }
     func showPlaylistWindow() { ensurePlaylistControlsVisible();if WorkspaceState.shared.mode == .single {WorkspaceState.shared.toggle()}; restore(playlistWindow);PlaylistWindowState.shared.syncVisibility();ControlMappings.shared.refreshStates() }
     func toggleNano() {
@@ -1557,6 +1564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowDidBecomeKey(_ notification:Notification) {WindowPresentation.shared.refresh()}
     @objc func toggleMini() { defer {WindowPresentation.shared.refresh()}; if miniWindow.isVisible && !miniWindow.isMiniaturized { showMain() } else { showMini() } }
     func restore(_ window: NSWindow) {
+        WindowSizes.shared.apply(window)
         if workspaceSection(for:window) != nil {
             playbackPanel.hide(animated:false)
             if !mainWindow.isVisible && !miniWindow.isVisible {showMain()}
@@ -1609,27 +1617,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func updateStatusItem() {
         let player=Player.shared
         let badge=MenuBarBadge.state(hasTrack:player.current != nil,playing:player.playing,crossfading:player.isCrossfading,error:player.error)
-        if lastStatusBadge != badge {
-            status.button?.image=badge.image();lastStatusBadge=badge
-            NSApp.applicationIconImage=player.playing ? HardPlayBrand.playingIcon:HardPlayBrand.idleIcon
+        let preview=MenuPreviewPlayer.shared.playing
+        if lastStatusBadge != badge || lastPreviewBadge != preview {
+            status.button?.effectiveAppearance.performAsCurrentDrawingAppearance {status.button?.image=HardPlayBrand.menuIcon(playing:player.playing,preview:preview)}
+            lastStatusBadge=badge;lastPreviewBadge=preview
+            NSApp.applicationIconImage=HardPlayBrand.statusIcon(playing:player.playing,preview:preview)
         }
         let details=player.current.map { " — \($0.title) · \(timeLabel(player.elapsed)) / \(timeLabel(player.duration))" } ?? ""
         status.button?.toolTip="Hard Play · \(badge.title)\(details)\nClick: player · Right-click: windows"
-        status.button?.setAccessibilityLabel("Hard Play — \(badge.title)")
+        status.button?.setAccessibilityLabel("Hard Play — \(badge.title) · Preview \(preview ? "Playing":"Paused")")
     }
     func windowDidMove(_ notification:Notification) {
+        if notification.object as? NSWindow === nanoControlsOwner {positionNanoControls()}
         nanoPlaylist.position()
         playbackPanel.position()
-        if notification.object as? NSWindow === mainWindow {arrangeWorkspaceWindows()}
+        if notification.object as? NSWindow === mainWindow {mainWindow.saveFrame(usingName:"HARDPLAY.stage.minimal.minimal.main");arrangeWorkspaceWindows()}
         if let window=notification.object as? NSWindow { PlaylistWindowState.shared.ownerMoved(window);if window === pocketWindow { window.saveFrame(usingName:"HARDPLAY.pocket");updatePocketEdge() } else if window === miniWindow { window.saveFrame(usingName:"HARDPLAY.stage.minimal.mini") } }
     }
+    func windowDidChangeScreen(_ notification:Notification) {WindowSizes.shared.objectWillChange.send();WindowSizes.shared.applyAll()}
     func windowDidResize(_ notification:Notification) {
+        if notification.object as? NSWindow === nanoControlsOwner {positionNanoControls()}
         nanoPlaylist.position()
         playbackPanel.position()
-        if notification.object as? NSWindow === mainWindow {WindowPresentation.shared.requestFit();arrangeWorkspaceWindows()}
+        if notification.object as? NSWindow === mainWindow {mainWindow.saveFrame(usingName:"HARDPLAY.stage.minimal.minimal.main");arrangeWorkspaceWindows()}
         if let window=notification.object as? NSWindow { PlaylistWindowState.shared.ownerMoved(window);if window === pocketWindow {window.saveFrame(usingName:"HARDPLAY.pocket");updatePocketEdge()} }
     }
     func windowWillResize(_ sender:NSWindow,to frameSize:NSSize)->NSSize {
+        if SizedWindow.identify(sender) != nil,!sender.styleMask.contains(.fullScreen) {return sender.frame.size}
         if sender === pocketWindow {return FloatingPlacement.shared.pocketLocked ? sender.frame.size:PocketPanel.limitedSize(frameSize)}
         if sender === miniWindow,FloatingPlacement.shared.miniLocked {return sender.frame.size}
         return frameSize
@@ -1651,14 +1665,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func lockControls() { ControlLock.shared.lock() }
     func updatePocketEdge() {
+        positionNanoControls()
         let near=pocketWindow.screen.map { pocketWindow.frame.minX < $0.visibleFrame.minX } ?? false
         if FloatingPlacement.shared.pocketNearLeftEdge != near { FloatingPlacement.shared.pocketNearLeftEdge=near }
         positionPocketDrawer()
     }
+    func toggleNanoControls(from requested:NSWindow?=nil) {
+        guard let owner=requested ?? pocketWindow,owner.isVisible else {return}
+        if NanoControlsState.shared.open,nanoControlsOwner === owner {hideNanoControls();return}
+        hideNanoControls();hidePocketDrawer();nanoPlaylist.hide()
+        nanoControlsOwner=owner
+        if nanoControlsWindow == nil {
+            let panel=FloatingPanel(contentRect:NSRect(x:0,y:0,width:206,height:320),styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+            panel.title="Hard Play Controls";panel.isOpaque=false;panel.backgroundColor = .clear;panel.level = .floating;panel.hasShadow=true;panel.hidesOnDeactivate=false;panel.isReleasedWhenClosed=false
+            panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
+            panel.contentView=NSHostingView(rootView:NanoControlsPanel());nanoControlsWindow=panel
+        }
+        NanoControlsState.shared.open=true;positionNanoControls()
+        guard let panel=nanoControlsWindow else {return}
+        owner.addChildWindow(panel,ordered:.above);let target=panel.frame;panel.setFrame(target.offsetBy(dx:-16,dy:0),display:false);panel.alphaValue=0;panel.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup {context in context.duration=0.16;panel.animator().setFrame(target,display:true);panel.animator().alphaValue=1}
+    }
+    func positionNanoControls() {
+        guard NanoControlsState.shared.open,let panel=nanoControlsWindow,let owner=nanoControlsOwner,
+              let screen=owner.screen?.visibleFrame else {return}
+        // Stay adjacent, falling back inside the screen at the right edge; never resize Nano.
+        let height=min(320,screen.height),width:CGFloat=206
+        let x=min(max(owner.frame.maxX-4,screen.minX),screen.maxX-width)
+        let y=min(max(owner.frame.maxY-height-38,screen.minY),screen.maxY-height)
+        panel.setFrame(NSRect(x:x,y:y,width:width,height:height),display:true)
+    }
+    func hideNanoControls() {
+        NanoControlsState.shared.open=false;nanoControlsWindow?.orderOut(nil);if let panel=nanoControlsWindow {panel.parent?.removeChildWindow(panel)};nanoControlsOwner=nil
+    }
+    func stopDJForPlayer() {if djWindow?.isVisible == true {hideNanoControls();DJSession.shared.stop();djWindow?.orderOut(nil)}}
+    @objc func showDJ() {
+        guard !ControlLock.shared.isLocked,!SetupLock.shared.settingsBlocked else {return}
+        guard !Player.shared.isLoading else {return}
+        Player.shared.pause() // Prevent the show player from doubling the DJ signal.
+        hideNanoControls()
+        if djWindow==nil {
+            let window=utilityWindow(title:"Hard Play DJ",width:1160,height:810)
+            window.contentView=ProfileHostingView(rootView:DJWindowView().windowSizeCanvas(.dj));djWindow=window;window.center()
+        }
+        WindowSizes.shared.apply(djWindow!);djWindow?.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
+    }
+    func closeDJ() {hideNanoControls();DJSession.shared.stop();djWindow?.orderOut(nil);showMain()}
     func togglePocketDrawer() {
         if PocketDrawerState.shared.open {hidePocketDrawer()}else {nanoPlaylist.hide();showPocketDrawer()}
     }
     private func showPocketDrawer() {
+        hideNanoControls()
         guard pocketWindow.isVisible else {return}
         if pocketDrawerWindow == nil {
             let panel=FloatingPanel(contentRect:NSRect(x:0,y:0,width:PocketDrawerLayout.width,height:PocketDrawerLayout.height),styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
@@ -1682,13 +1739,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !pocketDrawerPositioning,PocketDrawerState.shared.open,let panel=pocketDrawerWindow,
               let visible=pocketWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {return}
         pocketDrawerPositioning=true;defer {pocketDrawerPositioning=false}
-        let missing=visible.minX-(pocketWindow.frame.minX+158-PocketDrawerLayout.width-8)
+        let missing=visible.minX-(pocketWindow.frame.minX+158*WindowSizes.shared.scale(.nano)-PocketDrawerLayout.width-8)
         if missing>0 {
             let original=pocketWindow.frame
             let placed=pocketWindow.constrainFrameRect(original.offsetBy(dx:missing,dy:0),to:pocketWindow.screen)
             pocketDrawerReturn=(original,placed);pocketWindow.setFrame(placed,display:true)
         }
-        panel.setFrame(PocketDrawerLayout.frame(owner:pocketWindow.frame,visible:visible),display:true)
+        panel.setFrame(PocketDrawerLayout.frame(owner:pocketWindow.frame,visible:visible,faceInset:158*WindowSizes.shared.scale(.nano)),display:true)
     }
     func hidePocketDrawer(animated:Bool=true) {
         guard PocketDrawerState.shared.open else {return}
@@ -1712,10 +1769,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         preparePlayerWindow(.nano)
         // Preserve the user's position, including when the widget is hidden and restored.
         if !NSScreen.screens.contains(where:{$0.visibleFrame.contains(pocketWindow.frame)}),let screen=NSScreen.main { pocketWindow.setFrame(pocketWindow.constrainFrameRect(pocketWindow.frame,to:screen),display:false) }
-        updatePocketEdge();pocketWindow.orderFront(nil)
+        WindowSizes.shared.apply(pocketWindow);updatePocketEdge();pocketWindow.orderFront(nil)
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard !ControlLock.shared.isLocked else { return false }
+        if sender === djWindow {closeDJ();return false}
         if workspaceSection(for:sender) != nil || (sender === mainWindow && WorkspaceState.shared.section != nil) {
             returnToPlayer()
             return false
@@ -1726,7 +1784,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func collapseToMenuBar() {
         guard !ControlLock.shared.isLocked else {return}
         hoverWork?.cancel();hoverOpened=false;collapsedToMenuBar=true
-        hideUtilityWindows();hidePocketDrawer(animated:false);nanoPlaylist.hide()
+        hideNanoControls();hideUtilityWindows();hidePocketDrawer(animated:false);nanoPlaylist.hide()
         MenuPreviewPlayer.shared.stop()
         for window in [mainWindow,miniWindow,pocketWindow,playlistWindow] {window?.orderOut(nil)}
         popover?.performClose(nil);MenuBarPresentation.shared.setAttached(true)
@@ -1789,15 +1847,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 _ = StageTypography.name
 
-if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.arguments.contains("--render-brand-icon-active") {
+if CommandLine.arguments.contains("--render-wordmark") || CommandLine.arguments.contains("--render-wordmark-active") {
+    let image=HardPlayBrand.logo(color:.white,size:NSSize(width:872,height:478),playing:CommandLine.arguments.contains("--render-wordmark-active"))
+    guard let path=CommandLine.arguments.last,let cg=image.cgImage(forProposedRect:nil,context:nil,hints:nil),let data=NSBitmapImageRep(cgImage:cg).representation(using:.png,properties:[:]) else {fatalError("Unable to render wordmark")}
+    try data.write(to:URL(fileURLWithPath:path));print("Rendered stacked wordmark")
+} else if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.arguments.contains("--render-brand-icon-active") {
     _ = NSApplication.shared
     guard let path=CommandLine.arguments.last,path != "--render-brand-icon",
           let cg=(CommandLine.arguments.contains("--render-brand-icon-active") ? HardPlayBrand.playingIcon:HardPlayBrand.idleIcon).cgImage(forProposedRect:nil,context:nil,hints:nil),
           let data=NSBitmapImageRep(cgImage:cg).representation(using:.png,properties:[:]) else {fatalError("Unable to render brand icon")}
     try data.write(to:URL(fileURLWithPath:path))
     print("Rendered Hard Play icon")
+} else if CommandLine.arguments.contains("--theme-controls-gallery") {
+    Task { @MainActor in do {try renderThemeControlSamples(to:CommandLine.arguments.last!);exit(0)} catch {print(error);exit(1)} };RunLoop.main.run()
+} else if CommandLine.arguments.contains("--fixed-layout-test") {
+    Task { @MainActor in checkFixedWindowLayout();exit(0) };RunLoop.main.run()
+} else if CommandLine.arguments.contains("--playlist-preview-test") {
+    Task { @MainActor in do {try await checkPlaylistPreviewAudio();exit(0)}catch {print("FAIL: \(error.localizedDescription)");exit(1)} };RunLoop.main.run()
+} else if CommandLine.arguments.contains("--dj-check") {
+    do {try checkDJAudio()} catch {print("FAIL: DJ: "+error.localizedDescription);exit(1)}
 } else if CommandLine.arguments.contains("--style-check") {
-    let expectedThemes = ["Tape Blue","FOH","Tape Black","Stage","Cables","Minimal","Mono Console","Crew Tape","White"]
+    checkThemeControlContrast()
+    checkPreviewInteraction()
+    checkDJButtonRendering()
+    checkWindowSizes()
+    HardPlayBrand.checkPlayTint()
+    let expectedThemes = ["Mono Console","Crew Tape","White"]+StageTheme.conceptNames
     precondition(StageTheme.names == expectedThemes && StageTheme.named("White").isLight)
     let themeSuite = "local.hardplay.theme-check.\(UUID().uuidString)"
     let themeDefaults = UserDefaults(suiteName:themeSuite)!
@@ -1818,14 +1893,48 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
     reloadedThemes.removeCustom(reloadedThemes.theme.customThemeID!)
     precondition(reloadedThemes.theme.customThemeID == nil && AppearancePreferences(defaults:themeDefaults).customThemes.count == 1)
     themeDefaults.removePersistentDomain(forName:themeSuite)
-    print("PASS: nine built-in themes; custom theme save, reload, update, copy and delete")
+    let conceptPrefs=AppearancePreferences(defaults:themeDefaults)
+    for name in StageTheme.conceptNames {
+        let theme=StageTheme.named(name)
+        precondition(theme.isConcept && theme.flatBackdrop && theme.panel != nil && theme.waveform != nil)
+        for mono in [false,true] {for weight in [Font.Weight.regular,.medium,.semibold] {
+            guard let face=StageTypography.conceptName(theme,mono:mono,weight:weight) else {fatalError("Missing Hardplay font")}
+            precondition(face.hasPrefix("Hardplay") && NSFont(name:face,size:14) != nil)
+        }}
+        let data=try JSONEncoder().encode(theme);let restored=try JSONDecoder().decode(StageTheme.self,from:data)
+        precondition(restored.preset == name && restored.waveform == theme.waveform && restored.grid == theme.grid)
+        conceptPrefs.theme=theme;precondition(conceptPrefs.saveCustom(named:"Custom "+name))
+        let reloaded=AppearancePreferences(defaults:themeDefaults)
+        precondition(reloaded.theme.preset == name && reloaded.theme.panel == theme.panel && reloaded.theme.waveform == theme.waveform && reloaded.theme.secondaryText == theme.secondaryText)
+    }
+    for slot in ThemeColorSlot.allCases {conceptPrefs.setColor("#345678",for:slot);precondition(conceptPrefs.theme.hex(slot)=="345678")}
+    conceptPrefs.setGradient(true,for:.tape)
+    conceptPrefs.theme.gradients?["tape"]=ThemeFillGradient(end:"ABCDEF",angle:135)
+    precondition(conceptPrefs.saveCustom(named:"Gradient persistence"))
+    let gradientPrefs=AppearancePreferences(defaults:themeDefaults)
+    precondition(gradientPrefs.theme.gradients?["tape"] == ThemeFillGradient(end:"ABCDEF",angle:135))
+    let legacyData=try JSONEncoder().encode(StageTheme.named("Tape Blue"))
+    let legacyTheme=try JSONDecoder().decode(StageTheme.self,from:legacyData);precondition(legacyTheme.gradients == nil)
+    gradientPrefs.setGradient(false,for:.tape);precondition(gradientPrefs.theme.gradients == nil)
+    themeDefaults.removePersistentDomain(forName:themeSuite)
+    themeDefaults.set(true,forKey:"blueWhiteModes.v1");themeDefaults.set(true,forKey:"markerStyle.v1")
+    for name in ["Tape Blue","Tape Black","Stage","Cables","Minimal"] {
+        themeDefaults.set(try JSONEncoder().encode(StageTheme.named(name)),forKey:"stageAppearance.v1")
+        precondition(AppearancePreferences(defaults:themeDefaults).theme.preset == "Studio Precision")
+    }
+    var oldDigital=StageTheme.named("Digital Underground");oldDigital.accent="C4FF00";oldDigital.waveform="C4FF00";oldDigital.tape="987654"
+    themeDefaults.set(try JSONEncoder().encode(oldDigital),forKey:"stageAppearance.v1")
+    let migratedDigital=AppearancePreferences(defaults:themeDefaults).theme
+    precondition(migratedDigital.accent == "B5A163" && migratedDigital.waveform == "C0AF78" && migratedDigital.tape == "987654")
+    themeDefaults.removePersistentDomain(forName:themeSuite)
+    print("PASS: fifteen built-in themes; custom theme save, reload, update, copy and delete")
     precondition(StageTypography.name.lowercased().contains("balsamiq"))
     precondition(StageTheme.named("Mono Console").usesMono && StageTheme.named("Mono Console").flatBackdrop)
     precondition(StageTheme.named("Signal White").isLight && StageTheme.named("Crew Tape").flatBackdrop)
     precondition(NSFont(name:StageTypography.name,size:14) != nil)
     precondition(NSFont(name:CrewMarker.name,size:18) != nil && CrewMarker.name.contains("PermanentMarker"))
     precondition(HardPlayBrand.artwork != nil)
-    precondition(HardPlayBrand.wordmark != nil)
+    precondition(HardPlayBrand.wordmark != nil && (1.7...2).contains(HardPlayBrand.wordmark!.size.width/HardPlayBrand.wordmark!.size.height))
     for name in ["Tape Blue","Tape White","Tape Black","FOH","Stage Crew","Stagehand"] {let theme=StageTheme.named(name);precondition(theme.preset == name && theme.texture)}
     print("PASS: bundled marker font registered as \(StageTypography.name), dedicated mini marker font, Hard Play wordmark artwork and tape/crew presets available")
  } else if CommandLine.arguments.contains("--linked-playback-test") {
@@ -2403,7 +2512,12 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
     let defaults=UserDefaults(suiteName:suite)!
     let routes=AudioRouting(defaults:defaults,monitor:false)
     routes.mainUID="usb";routes.previewUID="built-in"
+    routes.setQuality(.high,role:.preview)
     let restored=AudioRouting(defaults:defaults,monitor:false)
+    precondition(restored.quality(.preview) == .high && restored.quality(.main) == .balanced)
+    let qualityPlayer=AVPlayer(playerItem:AVPlayerItem(url:URL(fileURLWithPath:"/tmp/hardplay-quality-probe.wav")))
+    restored.register(qualityPlayer,role:.preview)
+    precondition(qualityPlayer.currentItem?.audioTimePitchAlgorithm == .spectral)
     precondition(restored.mainUID == "usb" && restored.previewUID == "built-in")
     defaults.removePersistentDomain(forName:suite)
     let live=AudioRouting(defaults:UserDefaults(suiteName:suite)!)
@@ -2423,7 +2537,13 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
     }
     defaults.removePersistentDomain(forName:suite)
     print("PASS: independent routes, persistence, default resolution, missing output, AVPlayer binding")
-    for device in live.outputs {print("Output: \(device.name)")}
+    for device in live.outputs {
+        live.mainUID=device.id
+        let info=live.deviceInfo(.main)
+        precondition(info.id != 0 && info.rate>0 && info.channels>0 && info.latency.isFinite)
+        print("Output: \(device.name) · \(info.rate) Hz · \(info.frames) frames · \(info.channels) channels")
+    }
+    print("PASS: hardware capability reads and processing-quality persistence; no hardware settings modified")
 } else if CommandLine.arguments.contains("--repeat-test") {
     let suite="hardplay-repeat-test-"+UUID().uuidString
     let prefs=UserDefaults(suiteName:suite)!
@@ -2462,7 +2582,7 @@ if CommandLine.arguments.contains("--render-brand-icon") || CommandLine.argument
     precondition(edgeDrawer.minX==0 && drawerScreen.contains(edgeDrawer))
     let tinyDrawer=PocketDrawerLayout.frame(owner:drawerOwner,visible:NSRect(x:0,y:0,width:120,height:100))
     precondition(tinyDrawer.width==120 && tinyDrawer.height==100 && tinyDrawer.minX==0 && tinyDrawer.minY==0)
-    precondition(PocketPanel.limitedSize(NSSize(width:10,height:10)) == NSSize(width:344,height:380))
+    precondition(PocketPanel.limitedSize(NSSize(width:10,height:10)) == NSSize(width:384,height:380))
     precondition(PocketPanel.limitedSize(NSSize(width:900,height:900)) == NSSize(width:560,height:640))
     precondition(PlaylistWindowState.shouldHideSeparate(detached:true,docked:false,visible:true,minimized:false))
     precondition(!PlaylistWindowState.shouldHideSeparate(detached:true,docked:false,visible:true,minimized:true))

@@ -4,26 +4,30 @@ import SwiftUI
 final class PocketPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
-    static func limitedSize(_ proposed:NSSize)->NSSize {NSSize(width:min(560,max(344,proposed.width)),height:min(640,max(380,proposed.height)))}
+    static func limitedSize(_ proposed:NSSize)->NSSize {NSSize(width:min(560,max(384,proposed.width)),height:min(640,max(380,proposed.height)))}
     // The invisible space reserved for the lock drawer must not push the player away from the screen edge.
-    static func constrainedFrame(_ proposed:NSRect,visible:NSRect)->NSRect {
+    static func constrainedFrame(_ proposed:NSRect,visible:NSRect,scale:CGFloat=1)->NSRect {
         var frame=proposed
-        let faceLeft:CGFloat=158,faceRight:CGFloat=6
+        let faceLeft:CGFloat=158*scale,faceRight:CGFloat=6*scale
         frame.origin.x=min(max(frame.minX,visible.minX-faceLeft),visible.maxX-frame.width+faceRight)
         frame.origin.y=min(max(frame.minY,visible.minY-6),visible.maxY-frame.height+6)
         return frame
     }
     override func constrainFrameRect(_ frameRect:NSRect,to screen:NSScreen?)->NSRect {
         guard let screen=screen ?? self.screen ?? NSScreen.main else { return frameRect }
-        return Self.constrainedFrame(frameRect,visible:screen.visibleFrame)
+        return Self.constrainedFrame(frameRect,visible:screen.visibleFrame,scale:WindowSizes.shared.scale(.nano))
     }
 }
 struct PocketDragHandle: NSViewRepresentable {
+    @ObservedObject private var player=Player.shared
+    @ObservedObject private var preview=MenuPreviewPlayer.shared
+    @ObservedObject private var appearance=AppearancePreferences.shared
     final class HandleView:NSView {
+        var playing=false,preview=false
+        var ink=NSColor.white
         override var mouseDownCanMoveWindow:Bool { false }
         override func draw(_ dirtyRect:NSRect) {
-            let color=Player.shared.playing ? NSColor.systemRed:NSColor(Color(stageHex:AppearancePreferences.shared.theme.text))
-            HardPlayBrand.logo(color:color,size:NSSize(width:34,height:18)).draw(in:NSRect(x:(bounds.width-34)/2,y:(bounds.height-18)/2,width:34,height:18))
+            HardPlayBrand.logo(color:ink,size:NSSize(width:46,height:24),playing:playing,preview:preview).draw(in:NSRect(x:(bounds.width-46)/2,y:(bounds.height-24)/2,width:46,height:24))
         }
         private var initialMouse:NSPoint?
         private var initialFrame:NSRect?
@@ -51,7 +55,7 @@ struct PocketDragHandle: NSViewRepresentable {
         override func resetCursorRects() { addCursorRect(bounds,cursor:FloatingPlacement.shared.pocketLocked ? .arrow:.openHand) }
     }
     func makeNSView(context:Context)->HandleView { let view=HandleView();view.setAccessibilityElement(true);view.setAccessibilityRole(.staticText);view.setAccessibilityLabel("HARDPLAY");view.setAccessibilityHelp("Drag here to move the player anywhere");view.setAccessibilityValue("Ready to move");return view }
-    func updateNSView(_ view:HandleView,context:Context){view.needsDisplay=true;view.window?.invalidateCursorRects(for:view)}
+    func updateNSView(_ view:HandleView,context:Context){let ink=NSColor(Color(stageHex:appearance.theme.text));if view.playing != player.playing || view.preview != preview.playing || !view.ink.isEqual(ink) {view.playing=player.playing;view.preview=preview.playing;view.ink=ink;view.needsDisplay=true};view.window?.invalidateCursorRects(for:view)}
 }
 
 /// A visible grip is needed for the borderless companion window.
@@ -84,4 +88,39 @@ struct PocketResizeHandle:NSViewRepresentable {
     }
     func makeNSView(context:Context)->Handle {let view=Handle();view.setAccessibilityElement(true);view.setAccessibilityRole(.image);view.setAccessibilityLabel("Resize Pocket Player");return view}
     func updateNSView(_ view:Handle,context:Context){view.needsDisplay=true;view.window?.invalidateCursorRects(for:view)}
+}
+
+/// Explicit drag target behind the logo and empty header space. Buttons stay above it.
+struct PlayerHeaderDragRegion:NSViewRepresentable {
+    final class Region:NSView {
+        override var mouseDownCanMoveWindow:Bool {false}
+        override func acceptsFirstMouse(for event:NSEvent?)->Bool {true}
+        private var initialMouse:NSPoint?,initialFrame:NSRect?
+        private func point(_ event:NSEvent,window:NSWindow)->NSPoint {
+            if let point=event.cgEvent?.location,let primary=NSScreen.screens.first {return NSPoint(x:point.x,y:primary.frame.maxY-point.y)}
+            return window.convertPoint(toScreen:event.locationInWindow)
+        }
+        private var movable:Bool {
+            guard let window,window.isMovable else {return false}
+            if window === AppDelegate.shared?.miniWindow,FloatingPlacement.shared.miniLocked {return false}
+            if window === AppDelegate.shared?.pocketWindow,FloatingPlacement.shared.pocketLocked {return false}
+            return true
+        }
+        override func mouseDown(with event:NSEvent) {
+            guard movable,let window else {return}
+            initialMouse=point(event,window:window);initialFrame=window.frame;setAccessibilityValue("Drag started")
+        }
+        override func mouseDragged(with event:NSEvent) {
+            guard movable,let window,let initialMouse,let initialFrame else {return}
+            let cursor=point(event,window:window);var frame=initialFrame
+            frame.origin.x+=cursor.x-initialMouse.x;frame.origin.y+=cursor.y-initialMouse.y
+            let screen=NSScreen.screens.first {$0.frame.contains(cursor)} ?? window.screen
+            window.setFrame(window.constrainFrameRect(frame,to:screen),display:true)
+            setAccessibilityValue("Position \(Int(window.frame.minX)), \(Int(window.frame.minY))")
+        }
+        override func mouseUp(with event:NSEvent) {initialMouse=nil;initialFrame=nil}
+        override func resetCursorRects() {if window?.isMovable == true {addCursorRect(bounds,cursor:.openHand)}}
+    }
+    func makeNSView(context:Context)->Region {let region=Region();region.setAccessibilityElement(true);region.setAccessibilityRole(.group);region.setAccessibilityLabel("Move Player Window");region.setAccessibilityHelp("Drag the logo or empty header area to move this window");return region}
+    func updateNSView(_ view:Region,context:Context) {}
 }

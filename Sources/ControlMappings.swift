@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 struct MappedAction: RawRepresentable, Codable, Hashable, Identifiable {
     var rawValue: String
     var id: String { rawValue }
-    static let names: [(String,String)] = [("playPause","Play / Pause"),("mute","Mute"),("shuffle","Shuffle"),("repeat","Repeat Queue"),("stopAtEnd","Stop at End"),("previous","Previous Track"),("next","Next Track"),("restart","Restart"),("resume","Resume"),("fadeOff","Fade Off"),("fadeShort","Short Fade"),("fadeLong","Long Fade"),("applyAll","Apply Fade to All"),("volume","Master Volume"),("volumeDown","Volume Down"),("volumeUp","Volume Up"),("mini","Mini Player"),("playlist","Playlist Window"),("lockSetup","Lock Setup"),("lock","Lock All Controls"),("settings","Open PATCH"),("themes","Open Themes"),("mappings","Open MIDI / Keys"),("backup","Open Backup"),("viewer","Open Web Viewer"),("editSelected","Edit Selected Track"),("nano","Nano Player"),("autoFit","Auto Fit Window"),("autoNano","Nano on Minimize"),("fullScreen","Full Screen"),("hints","Control Hints")]
+    static let names: [(String,String)] = [("playPause","Play / Pause"),("mute","Mute"),("shuffle","Shuffle"),("repeat","Repeat Queue"),("stopAtEnd","Stop at End"),("previous","Previous Track"),("next","Next Track"),("restart","Restart"),("resume","Resume"),("fadeOff","Fade Off"),("fadeShort","Short Fade"),("fadeLong","Long Fade"),("applyAll","Apply Fade to All"),("volume","Master Volume"),("volumeDown","Volume Down"),("volumeUp","Volume Up"),("mini","Mini Player"),("playlist","Playlist Window"),("lockSetup","Lock Setup"),("lock","Lock All Controls"),("dj","DJ · Two Decks"),("settings","Open PATCH"),("themes","Open Themes"),("mappings","Open MIDI / Keys"),("backup","Open Backup"),("viewer","Open Web Viewer"),("editSelected","Edit Selected Track"),("nano","Nano Player"),("autoFit","Cycle Window Size"),("autoNano","Nano on Minimize"),("fullScreen","Full Screen"),("hints","Control Hints")]
     static var all: [MappedAction] { names.map { .init(rawValue:$0.0) } }
     var title: String {
         if rawValue.hasPrefix("track:") { return "Play · " + (Player.shared.tracks.first { $0.id == String(rawValue.dropFirst(6)) }?.title ?? URL(fileURLWithPath:String(rawValue.dropFirst(6))).deletingPathExtension().lastPathComponent) }
@@ -164,7 +164,7 @@ final class ControlMappings: ObservableObject {
         case "mini": return (AppDelegate.shared?.miniWindow?.isVisible ?? false) && !(AppDelegate.shared?.miniWindow?.isMiniaturized ?? false)
         case "playlist": return (AppDelegate.shared?.playlistWindow?.isVisible ?? false) && !(AppDelegate.shared?.playlistWindow?.isMiniaturized ?? false)
         case "nano":return WindowPresentation.shared.nano
-        case "autoFit":return WindowPresentation.shared.autoFit
+        case "autoFit":return WindowSizes.shared.choice(.main) != .optimal
         case "autoNano":return WindowPresentation.shared.nanoOnMinimize
         case "fullScreen":return WindowPresentation.shared.fullScreen
         case "hints":return HintPreferences.shared.enabled
@@ -210,10 +210,11 @@ final class ControlMappings: ObservableObject {
         case "lock": AppDelegate.shared.lockControls()
         case "editSelected":
             if let track=p.selectedTrack ?? p.current {AppDelegate.shared?.showQuickEdit(track)}
+        case "dj":AppDelegate.shared?.showDJ()
         case "settings","themes","mappings","backup","viewer":
             if let section=action.workspaceSection {WorkspaceState.shared.open(section)}
         case "nano":if toggles || !WindowPresentation.shared.nano {AppDelegate.shared?.toggleNano()}
-        case "autoFit":if !setupLock.settingsBlocked {WindowPresentation.shared.autoFit = toggles ? !WindowPresentation.shared.autoFit:true}
+        case "autoFit":if !setupLock.settingsBlocked {WindowSizes.shared.cycle(WindowPresentation.shared.nano ? .nano:WindowPresentation.shared.mini ? .mini:.main)}
         case "autoNano":if !setupLock.settingsBlocked {WindowPresentation.shared.nanoOnMinimize = toggles ? !WindowPresentation.shared.nanoOnMinimize:true}
         case "fullScreen":if toggles || !WindowPresentation.shared.fullScreen {AppDelegate.shared?.toggleStageFullScreen()}
         case "hints":if !setupLock.settingsBlocked {HintPreferences.shared.enabled = toggles ? !HintPreferences.shared.enabled:true}

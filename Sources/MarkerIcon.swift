@@ -3,21 +3,24 @@ import AppKit
 
 /// Hand-inked paths, not font glyphs: every in-app icon follows the same marker weight.
 struct MarkerIcon:View {
+    @ObservedObject private var appearance=AppearancePreferences.shared
     let systemName:String
     var size:CGFloat=16
     private static var cache:[String:NSImage]=[:]
-    static func image(_ name:String)->NSImage {
-        if let image=cache[name] {return image}
+    static func image(_ name:String,precise:Bool=false)->NSImage {
+        let key=name+(precise ? ":precise":":marker")
+        if let image=cache[key] {return image}
+        if precise,let image=NSImage(systemSymbolName:name,accessibilityDescription:nil) {image.isTemplate=true;cache[key]=image;return image}
         let image=NSImage(size:NSSize(width:24,height:24),flipped:true) {_ in
             guard let context=NSGraphicsContext.current?.cgContext else {return false}
             let path=Self.path(name).cgPath
-            context.setStrokeColor(NSColor.black.cgColor);context.setLineCap(.round);context.setLineJoin(.round);context.setLineWidth(2.2);context.addPath(path);context.strokePath()
-            context.setAlpha(0.22);context.translateBy(x:0.28,y:-0.18);context.setLineWidth(1.4);context.addPath(path);context.strokePath();return true
+            context.setStrokeColor(NSColor.black.cgColor);context.setLineCap(.round);context.setLineJoin(.round);context.setLineWidth(precise ? 1.7:2.2);context.addPath(path);context.strokePath()
+            if !precise {context.setAlpha(0.22);context.translateBy(x:0.28,y:-0.18);context.setLineWidth(1.4);context.addPath(path);context.strokePath()};return true
         }
-        image.isTemplate=true;cache[name]=image;return image
+        image.isTemplate=true;cache[key]=image;return image
     }
     var body:some View {
-        Image(nsImage:Self.image(systemName)).renderingMode(.template).resizable().aspectRatio(contentMode:.fit).frame(width:size,height:size).accessibilityHidden(true)
+        Image(nsImage:Self.image(systemName,precise:appearance.theme.isConcept)).renderingMode(.template).resizable().aspectRatio(contentMode:.fit).frame(width:size,height:size).accessibilityHidden(true)
     }
     static func path(_ name:String)->Path {
         var p=Path()

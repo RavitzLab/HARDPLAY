@@ -1,4 +1,4 @@
-# Hard Play
+# HARDPLAY
 
 <img src="assets/branding/hardplay-wordmark-source.png" width="160" alt="Hard Play">
 
@@ -16,7 +16,7 @@
 
 The app is ad-hoc signed and **not notarized by Apple**. If macOS blocks its first launch, verify the source and use the normal **System Settings → Privacy & Security → Open Anyway** flow. Do not disable Gatekeeper. Local playback does not need an internet connection. Supported codecs depend on macOS; the app does not promise every audio format.
 
-**Versions:** current source is **0.36.2**. Installers are published separately under Releases; check the version before downloading. Source changes do not deploy the web edition.
+**Versions:** current source is **Beta 5 (0.44.0)**. Installers are published separately under Releases; check the version before downloading. Source changes do not deploy the web edition.
 
 ## What you can do
 
@@ -28,18 +28,18 @@ The app is ad-hoc signed and **not notarized by Apple**. If macOS blocks its fir
 | Queue | Show in Finder from track actions; add/drop files, reorder by the handle, duplicate, rename, sort, remove and save named sets. Removing an entry does not delete its source audio. |
 | Waveforms | Hover to inspect time. Unlock the small seek padlock for one seek gesture; it relocks on release or after an unused unlock expires. NEXT is a preview of the queued track; use **Start at…** in its playlist actions to set a start point. |
 | Editing | Quick Edit offers waveform zoom, in/out points, split, multiple selected regions, joining and edge-silence detection. Save a new WAV as a copy or replace the queue entry; the original file stays unchanged. |
-| Audio | Independent Main and Preview output selection. Concurrent audition requires separate, available outputs. |
+| Audio | Independent Main/Preview devices; supported hardware sample rates, buffers and device-wide stereo channel preferences. Processing quality for speed correction. Concurrent audition requires separate, available outputs. |
 | Windows | Main, Mini, Nano and menu-bar controller share one player. Closing a player window keeps the app running in the menu bar; **Command-Q quits**. Settings have **Back to Player**; closing them returns to the originating player. |
-| Appearance | Tape Blue, FOH, Tape Black, Stage, Cables, Minimal, Mono Console, Crew Tape and White. Save named custom themes with colors, opacity and control sizes under **My Themes**. |
+| Appearance | Mono Console, Crew Tape and White, plus twelve concept themes including Studio Precision, Modular Grid, Timecode Core, Shadow System and eight additional styles. See [theme specifications](docs/CONCEPT-THEMES.md). Edit colors in an adjacent popover, with optional two-color gradients for backgrounds, panels, surfaces and playlist tape. Save named custom themes with colors, opacity and control sizes under **My Themes**. |
 | Protection | The control lock protects live operation. Hold its unlock control for **1.5 seconds**. Seek locks and playlist/setup protection are separate controls. |
 
-**PATCH → App** opens Themes & Appearance, Keyboard / MIDI, Timecode & Backup and Web Viewer. Hover hints can be enabled with the question-mark button or in PATCH. [The user guide](docs/USER_GUIDE.ru.md) explains common workflows and shortcuts.
+**PATCH** has separate sections for Audio, App, Themes & Appearance, Keyboard / MIDI, Timecode & Backup, Web Viewer, Playlists and Window. Hover hints can be enabled with the question-mark button. Selecting a PATCH section immediately displays its controls in the same panel. Playlist playback and Undo are in **Playlist Actions → Playlist Settings**. [The user guide](docs/USER_GUIDE.ru.md) explains common workflows and shortcuts.
 
 ## Additional tools and limits
 
 - **Quick Edit:** [editing guide](docs/QUICK-EDIT.ru.md). It edits regions from one source file; it is not a multitrack DAW.
 - **Web Viewer:** [local read-only playlist display](docs/WEB-VIEWER.ru.md). It does not stream audio or offer remote transport control.
-- **Backup set sync:** [connect two Macs and choose the source](docs/BACKUP-SETUP.ru.md). Push or pull playlist metadata, matching locally loaded files by SHA-256. Review before applying; Undo restores the destination. The A/B indicator next to PATCH shows connection and set matching. Enable **Linked Playback** on both paused Macs to share Play/Pause, Next/Previous and seeks, with Primary A driving track choice and position updates. This is LAN control, not sample-accurate clock synchronization; automatic failover and hardware timecode are not implemented. [Future stage plan](docs/TIMECODE-BACKUP-PLAN.ru.md).
+- **Backup set sync:** [connect two Macs and choose the source](docs/BACKUP-SETUP.ru.md). Push or pull playlist metadata, matching locally loaded files by SHA-256. Review before applying; Undo restores the destination. The A/B indicator next to PATCH shows connection and set matching. Enable **Linked Playback** on both paused Macs to share Play/Pause, Next/Previous and seeks, with Primary A driving track choice and position updates. Sync Timing measures network RTT/jitter and estimated player offset. Optional Auto Align on B gently corrects small drift; physical audio calibration remains external. This is LAN control, not sample-accurate clock synchronization; automatic failover and hardware timecode are not implemented. [Future stage plan](docs/TIMECODE-BACKUP-PLAN.ru.md).
 - **Offline web player:** a separate edition in [`web/`](web/README.md). Its features and browser storage differ from the Mac app. It does not automatically share the native audio library.
 
 Hardware MIDI, physical audio routing, cross-computer operation and live PA use need testing with the intended equipment. See [validation status](VALIDATION.md).
@@ -85,3 +85,7 @@ Audio and network checks can require macOS permissions and an unrestricted local
 Build output, caches, personal sets, audio, credentials, hosting identities and unused design drafts are excluded. See [repository hygiene](docs/REPOSITORY.md). Font license notices are retained in `assets/fonts/` and `web/public/font-license.txt`. No general open-source license is currently granted for the application code; public source visibility alone does not grant redistribution rights.
 
 Release maintainers: a main-branch commit containing `[release]` (or a manual **Publish Mac Release** run) builds and tests the current version, then publishes its DMG, ZIP and checksums using `docs/RELEASE-<version>.md`. Existing releases are never overwritten.
+
+DJ mode and Nano custom controls: [quick guide](docs/DJ-MODE.ru.md). DJ is experimental; physical latency and live hardware are not certified.
+
+Playlist audition: sending a track to the separate Preview output replaces its title with a seekable waveform. Click the preview button to pause/resume; hold for 0.5 seconds to stop and restore the title. Pausing retains the audition position. The row labels the actual Preview output; Main playback is independent.

@@ -11,10 +11,31 @@ enum StageTypography {
            let name=CTFontDescriptorCopyAttribute(descriptor,kCTFontNameAttribute) as? String {return name}
         return "BalsamiqSans-Bold"
     }()
-    static func native(_ size:CGFloat)->NSFont {if AppearancePreferences.shared.theme.usesMono {return .monospacedSystemFont(ofSize:size,weight:.medium)};return NSFont(name:name,size:size) ?? NSFont(name:"MarkerFelt-Wide",size:size) ?? .systemFont(ofSize:size)}
+    private static var registered:[String:String]=[:]
+    static func conceptName(_ theme:StageTheme,mono:Bool,weight:Font.Weight = .regular)->String? {
+        guard theme.isConcept else {return nil}
+        let family=mono || theme.preset == "Rave Terminal" ? "HardplayMono":(["Modular Grid","Brutalist Play","Digital Underground","Grid Motion"].contains(theme.preset) ? "HardplayGrid":"HardplaySans")
+        let style=[Font.Weight.semibold,.bold,.heavy,.black].contains(weight) ? "Semibold":weight == .medium ? "Medium":"Regular"
+        let resource=family+"-"+style
+        if let name=registered[resource] {return name}
+        guard let url=Bundle.main.url(forResource:resource,withExtension:"ttf") else {return nil}
+        CTFontManagerRegisterFontsForURL(url as CFURL,.process,nil)
+        guard let descriptors=CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],let descriptor=descriptors.first,let name=CTFontDescriptorCopyAttribute(descriptor,kCTFontNameAttribute) as? String else {return nil}
+        registered[resource]=name;return name
+    }
+    static func native(_ size:CGFloat)->NSFont {
+        let theme=AppearancePreferences.shared.theme
+        if theme.isConcept {if let name=conceptName(theme,mono:false,weight:.medium),let font=NSFont(name:name,size:size) {return font};return .systemFont(ofSize:size,weight:.medium)}
+        if AppearancePreferences.shared.theme.usesMono {return .monospacedSystemFont(ofSize:size,weight:.medium)};return NSFont(name:name,size:size) ?? NSFont(name:"MarkerFelt-Wide",size:size) ?? .systemFont(ofSize:size)}
 }
 extension Font {
-    static func stage(size:CGFloat,weight:Font.Weight = .regular,design:Font.Design = .default)->Font {if AppearancePreferences.shared.theme.usesMono {return .system(size:size,weight:weight,design:.monospaced)};return .custom(StageTypography.name,size:size)}
+    static func stage(size:CGFloat,weight:Font.Weight = .regular,design:Font.Design = .default)->Font {
+        let theme=AppearancePreferences.shared.theme
+        if theme.isConcept {
+            if let name=StageTypography.conceptName(theme,mono:design == .monospaced,weight:weight) {return .custom(name,size:size).weight(weight)}
+            return .system(size:size,weight:weight,design:design)
+        }
+        if AppearancePreferences.shared.theme.usesMono {return .system(size:size,weight:weight,design:.monospaced)};return .custom(StageTypography.name,size:size)}
     static func stage(_ style:Font.TextStyle,design:Font.Design = .default)->Font {
         let size:CGFloat
         switch style {case .largeTitle:size=28;case .title:size=24;case .title2:size=20;case .title3:size=17;case .headline:size=14;case .subheadline:size=12;case .callout:size=13;case .caption:size=11;case .caption2:size=10;case .footnote:size=11;default:size=14}
@@ -40,7 +61,7 @@ var tapeInk:Color {
 }
 struct TapeSurface:View {
     @ObservedObject private var appearance=AppearancePreferences.shared
-    var body:some View {TapeEdge().fill(tapeB).overlay(TapeGrain().clipShape(TapeEdge())).overlay(TapeEdge().stroke(.white.opacity(0.2),lineWidth:0.7)).shadow(color:.black.opacity(0.15),radius:1,y:1)}
+    var body:some View {TapeEdge().fill(appearance.theme.paint(.tape)).overlay(TapeGrain().clipShape(TapeEdge())).overlay(TapeEdge().stroke(.white.opacity(0.2),lineWidth:0.7)).shadow(color:.black.opacity(0.15),radius:1,y:1)}
 }
 enum WordmarkLayout {case horizontal,stacked}
 struct HardPlayWordmark:View {

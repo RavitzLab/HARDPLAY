@@ -177,7 +177,7 @@ struct QuickEditView:View {
         ScrollView { VStack(alignment:.leading,spacing:12) {
             HStack {MarkerLabel("Quick Edit",systemImage:"scissors").font(.stage(.title2).bold());Spacer();Text("TRIM").font(.stage(.caption).bold()).foregroundStyle(accent)}
             Text(edit.track.title).font(.stage(.headline)).lineLimit(2)
-            Text("Choose a fragment. Save a copy or replace this playlist item.").font(.stage(.callout)).foregroundStyle(.secondary)
+            Text("Choose a fragment. Save a copy or replace this playlist item.").font(.stage(.callout)).stageSecondary()
             VStack(alignment:.leading,spacing:8) {
                 HStack {
                     Button {edit.detectSilence()} label:{Label(edit.analysingSilence ? "Analysing…":"Detect Edge Silence",systemImage:"waveform.badge.magnifyingglass").font(.stage(size:12)).padding(8)}.buttonStyle(PlayerControlStyle()).disabled(protected || !edit.canEdit)
@@ -205,7 +205,7 @@ struct QuickEditView:View {
                 HStack {Text(ClipRange.label(edit.viewport.start)).font(.stage(.caption).monospacedDigit());Slider(value:Binding(get:{edit.viewport.start},set:{edit.viewport.pan($0)}),in:0...max(0.001,edit.duration-edit.viewport.length)).accessibilityLabel("Audio Timeline Scroll");Text(ClipRange.label(edit.viewport.start+edit.viewport.length)).font(.stage(.caption).monospacedDigit())}
             }
             HStack {Button("Split at Cursor") {edit.splitAtCursor()};Button("Clear Selection") {edit.clearSelection()};Spacer();Text("\(edit.selectionCount) selected · \(ClipRange.label(edit.selectedDuration))").font(.stage(.caption).monospacedDigit())}.disabled(protected || edit.busy || edit.duration<=0)
-            Text("Drag to select · ⌘-drag adds a region · ⌘-click selects clips · Option-hover auditions · arrows move by one sample").font(.stage(.caption)).foregroundStyle(.secondary)
+            Text("Drag to select · ⌘-drag adds a region · ⌘-click selects clips · Option-hover auditions · arrows move by one sample").font(.stage(.caption)).stageSecondary()
             HStack(spacing:14) {
                 VStack(alignment:.leading){Text("IN").font(.stage(.caption).bold());TextField("In",text:$edit.inText).onSubmit {edit.commitText()}.accessibilityLabel("Clip In Time");Button("Mark In") {edit.setStart(edit.position);edit.commitRegion(add:false)}}
                 VStack(alignment:.leading){Text("OUT").font(.stage(.caption).bold());TextField("Out",text:$edit.outText).onSubmit {edit.commitText()}.accessibilityLabel("Clip Out Time");Button("Mark Out") {edit.setEnd(edit.position);edit.commitRegion(add:false)}}
@@ -223,7 +223,7 @@ struct QuickEditView:View {
                 MarkerIcon(systemName:"speaker.wave.1").font(.stage(.caption))
                 Slider(value:$edit.previewVolume,in:0...1).frame(width:60).accessibilityLabel("Preview Volume")
             }
-            if player.playing && !routing.separateOutputs {Text("Choose a different Preview Output to audition while Main is playing.").font(.stage(.caption)).foregroundStyle(.secondary)}
+            if player.playing && !routing.separateOutputs {Text("Choose a different Preview Output to audition while Main is playing.").font(.stage(.caption)).stageSecondary()}
             Spacer(minLength:0)
             Text(edit.message).font(.stage(.caption)).textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
             if edit.busy {HStack {ProgressView().controlSize(.small);Button("Cancel Export"){edit.cancelExport()}}}
@@ -232,7 +232,7 @@ struct QuickEditView:View {
                 Button(edit.selectionCount>1 ? "Join & Replace…":"Replace in Playlist…") {edit.save(replace:true)}.buttonStyle(.bordered)
                 Spacer()
             }.disabled(edit.busy || edit.analysingSilence || protected || !edit.hasSelection)
-            Text("Original file preserved · WAV 32-bit float · original sample rate & channels").font(.stage(.caption2)).foregroundStyle(.secondary)
+            Text("Original file preserved · WAV 32-bit float · original sample rate & channels").font(.stage(.caption2)).stageSecondary()
         }.padding(22) }.frame(minWidth:620,minHeight:embedded ? 300:650).task {await edit.prepare()}
             .task(id:edit.viewportKey) {await edit.loadWaveform()}
             .onChange(of:lock.isLocked) {_,value in if value {edit.stopPreview()}}

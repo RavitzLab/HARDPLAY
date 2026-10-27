@@ -48,11 +48,19 @@ jobs:
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           notes="docs/RELEASE-$version.md"
           test -f "$notes"
-          tag="v$version"
+          tag=$(/usr/libexec/PlistBuddy -c 'Print :HardPlayReleaseTag' build/HARDPLAY.app/Contents/Info.plist 2>/dev/null || echo "v$version")
+          title=$(/usr/libexec/PlistBuddy -c 'Print :HardPlayReleaseTitle' build/HARDPLAY.app/Contents/Info.plist 2>/dev/null || echo "Hard Play $version")
+          prerelease=$(/usr/libexec/PlistBuddy -c 'Print :HardPlayPrerelease' build/HARDPLAY.app/Contents/Info.plist 2>/dev/null || echo false)
+          flags=()
+          if [[ "$prerelease" == true ]]; then flags+=(--prerelease); fi
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release already exists; existing assets will not be replaced."
             exit 1
           fi
           (cd build/release && shasum -a 256 -c "HARDPLAY-$version-macOS-arm64.sha256")
-          gh release create "$tag" build/release/HARDPLAY-$version-macOS-arm64.{dmg,zip,sha256} --target "$GITHUB_SHA" --title "Hard Play $version" --notes-file "$notes" --draft
-          gh release edit "$tag" --draft=false --latest
+          gh release create "$tag" build/release/HARDPLAY-$version-macOS-arm64.{dmg,zip,sha256} --target "$GITHUB_SHA" --title "$title" --notes-file "$notes" --draft "${flags[@]}"
+          if [[ "$prerelease" == true ]]; then
+            gh release edit "$tag" --draft=false --prerelease
+          else
+            gh release edit "$tag" --draft=false --latest
+          fi

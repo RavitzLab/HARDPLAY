@@ -12,7 +12,7 @@ struct QueuePolicyControls: View {
             modeButton("Restart on Play",hint:"Start selected track from the beginning",active:player.startMode == .beginning,first:"play.fill",second:"arrow.counterclockwise") { player.startMode = .beginning }
             modeButton("Resume on Play",hint:"Start selected track from its saved position",active:player.startMode == .resume,first:"play.fill",second:"arrow.uturn.backward") { player.startMode = .resume }
             Spacer(minLength:2)
-            Text("ALL").font(.stage(size:8,weight:.semibold)).foregroundStyle(.secondary)
+            Text("ALL").font(.stage(size:8,weight:.semibold)).stageSecondary()
             ForEach(FadeMode.allCases,id:\.self) { mode in
                 Button { player.setFadeModeForAll(mode) } label: {
                     Text(mode == .none ? "0":"\(String(format:"%g",mode.seconds))s").font(.stage(size:10,weight:.semibold,design:.monospaced)).frame(width:29,height:28)

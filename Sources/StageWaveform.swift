@@ -115,5 +115,13 @@ struct StageWaveform:NSViewRepresentable {
         override func resetCursorRects(){addCursorRect(bounds,cursor:enabled ? .crosshair:.arrow)}
     }
     func makeNSView(context:Context)->WaveView {let view=WaveView();view.setAccessibilityElement(true);view.setAccessibilityRole(.image);view.setAccessibilityLabel("Interactive Audio Waveform");view.setAccessibilityHelp("Hover to inspect time. Unlock with the padlock, then click or drag to seek. Release to lock again.");return view}
-    func updateNSView(_ view:WaveView,context:Context){if view.identity != identity || !enabled {view.cancelGesture()};view.identity=identity;view.peaks=peaks;view.duration=duration;view.elapsed=elapsed;view.gain=gain;view.ink=NSColor(color);view.enabled=enabled;view.onBegin=onBegin;view.onFinish=onFinish;view.action=action;view.needsDisplay=true;view.window?.invalidateCursorRects(for:view);view.setAccessibilityHelp(enabled ? "Hover to inspect time. Unlock with the padlock, then click or drag to seek. Release to lock again.":"Seeking is locked. Use the padlock next to the percentage. NEXT remains preview only.");view.setAccessibilityValue("\(timeLabel(elapsed)) / \(timeLabel(duration))")}
+    func updateNSView(_ view:WaveView,context:Context) {
+        let ink=NSColor(color),permissionChanged=view.enabled != enabled
+        let changed=view.identity != identity || view.peaks != peaks || view.duration != duration || view.elapsed != elapsed || view.gain != gain || view.ink != ink || permissionChanged
+        if view.identity != identity || (view.enabled && !enabled) {view.cancelGesture()}
+        view.identity=identity;view.peaks=peaks;view.duration=duration;view.elapsed=elapsed;view.gain=gain;view.ink=ink;view.enabled=enabled;view.onBegin=onBegin;view.onFinish=onFinish;view.action=action
+        if changed {view.needsDisplay=true;view.setAccessibilityValue("\(timeLabel(elapsed)) / \(timeLabel(duration))")}
+        if permissionChanged {view.window?.invalidateCursorRects(for:view)}
+        if changed {view.setAccessibilityHelp(enabled ? "Hover to inspect time. Click or drag to seek.":"Seeking is locked. Use the padlock next to the percentage. NEXT remains preview only.")}
+    }
 }

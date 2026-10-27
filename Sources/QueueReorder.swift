@@ -39,11 +39,13 @@ final class QueueDragPosition:ObservableObject {
 }
 /// Direct native handle tracking avoids nested SwiftUI drop targets swallowing a move.
 struct QueueDragHandle:NSViewRepresentable {
+    @ObservedObject private var appearance=AppearancePreferences.shared
     let id:String
     let title:String
     var enabled:Bool
     final class Handle:NSView {
         private static let handles=NSHashTable<Handle>.weakObjects()
+        var ink=NSColor.secondaryLabelColor
         var id="",title="",enabled=true
         private var down:NSPoint?
         private var moved=false
@@ -52,7 +54,7 @@ struct QueueDragHandle:NSViewRepresentable {
         override var mouseDownCanMoveWindow:Bool {false}
         override func acceptsFirstMouse(for event:NSEvent?)->Bool {true}
         override func draw(_ dirtyRect:NSRect) {
-            NSColor.secondaryLabelColor.withAlphaComponent(enabled ? 0.85:0.3).setStroke()
+            ink.withAlphaComponent(enabled ? 0.85:0.3).setStroke()
             let path=NSBezierPath();path.lineWidth=1.6
             for y in [-4.0,0,4] {path.move(to:NSPoint(x:bounds.midX-5,y:bounds.midY+y));path.line(to:NSPoint(x:bounds.midX+5,y:bounds.midY+y))};path.stroke()
         }
@@ -87,5 +89,5 @@ struct QueueDragHandle:NSViewRepresentable {
         override func resetCursorRects(){if enabled {addCursorRect(bounds,cursor:.openHand)}}
     }
     func makeNSView(context:Context)->Handle {let view=Handle(frame:.zero);view.setAccessibilityElement(true);view.setAccessibilityRole(.image);return view}
-    func updateNSView(_ view:Handle,context:Context){view.id=id;view.title=title;view.enabled=enabled;view.needsDisplay=true;view.setAccessibilityLabel("Reorder Track: "+title);view.window?.invalidateCursorRects(for:view)}
+    func updateNSView(_ view:Handle,context:Context){view.ink=NSColor(Color(stageHex:appearance.theme.secondaryColor));view.id=id;view.title=title;view.enabled=enabled;view.needsDisplay=true;view.setAccessibilityLabel("Reorder Track: "+title);view.window?.invalidateCursorRects(for:view)}
 }

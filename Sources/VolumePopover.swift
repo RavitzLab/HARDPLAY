@@ -27,7 +27,7 @@ private struct VolumePanelContent:View {
             Text("\(Int(player.volume*100))%").font(.system(size:12,weight:.semibold,design:.monospaced))
         }.padding(14).frame(width:86,height:230)
             .foregroundStyle(Color(stageHex:appearance.theme.text))
-            .background(LinearGradient(colors:[Color(stageHex:appearance.theme.background),Color(stageHex:appearance.theme.background).opacity(0.94)],startPoint:.top,endPoint:.bottom),in:RoundedRectangle(cornerRadius:12))
+            .background(appearance.theme.paint(.background),in:RoundedRectangle(cornerRadius:12))
             .overlay(RoundedRectangle(cornerRadius:12).stroke(accent.opacity(0.4),lineWidth:1))
             .preferredColorScheme(appearance.theme.isLight ? .light:.dark)
     }
@@ -64,6 +64,8 @@ struct AttachedControlPanelAnchor:NSViewRepresentable {
                 observers.append(NotificationCenter.default.addObserver(forName:NSApplication.didResignActiveNotification,object:nil,queue:.main) {[weak self] _ in self?.dismiss()})
                 monitor=NSEvent.addLocalMonitorForEvents(matching:[.leftMouseDown,.rightMouseDown]) {[weak self] event in
                     guard let self else {return event}
+                    var target=event.window
+                    while let candidate=target {if candidate === self.panel {return event};target=candidate.parent}
                     if event.window !== self.panel {
                         if event.window === self.window,self.bounds.contains(self.convert(event.locationInWindow,from:nil)) {return event}
                         self.dismiss()

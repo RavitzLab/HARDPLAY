@@ -10,12 +10,14 @@ final class QuickActions:ObservableObject {
     static let shared=QuickActions()
     @Published private(set) var buttons:[QuickActionButton]=[]
     private let defaults:UserDefaults
-    init(defaults:UserDefaults = .standard) {
+    private let key:String
+    init(defaults:UserDefaults = .standard,key:String="quickActionButtons") {
+        self.key=key
         self.defaults=defaults
-        if let data=defaults.data(forKey:"quickActionButtons"),let saved=try? JSONDecoder().decode([QuickActionButton].self,from:data),saved.count<=4,Set(saved.map(\.id)).count==saved.count,saved.allSatisfy(\.valid) {buttons=saved}
+        if let data=defaults.data(forKey:key),let saved=try? JSONDecoder().decode([QuickActionButton].self,from:data),saved.count<=4,Set(saved.map(\.id)).count==saved.count,saved.allSatisfy(\.valid) {buttons=saved}
     }
     private var canEdit:Bool {!ControlLock.shared.isLocked && !SetupLock.shared.settingsBlocked}
-    private func save() {defaults.set(try? JSONEncoder().encode(buttons),forKey:"quickActionButtons")}
+    private func save() {defaults.set(try? JSONEncoder().encode(buttons),forKey:key)}
     func add(_ action:MappedAction) {
         guard canEdit,buttons.count<4 else {return}
         let button=QuickActionButton(action:action,behavior:action.defaultBehavior)
@@ -59,7 +61,7 @@ struct QuickActionSettings:View {
     var body:some View {
         DisclosureGroup("Custom quick buttons") {
             VStack(alignment:.leading,spacing:12) {
-                Text("Up to four buttons below the player toolbar. Right-click to reassign. Trigger runs once; Toggle switches on and off.").font(.stage(size:11)).foregroundStyle(.secondary)
+                Text("Up to four buttons below the player toolbar. Right-click to reassign. Trigger runs once; Toggle switches on and off.").font(.stage(size:11)).stageSecondary()
                 ForEach(actions.buttons) {button in
                     HStack {Text(button.action.title).lineLimit(2).fixedSize(horizontal:false,vertical:true);Spacer();Menu {QuickActionMenu(button:button)} label:{Text(button.behavior.rawValue+" · Edit")}}
                 }

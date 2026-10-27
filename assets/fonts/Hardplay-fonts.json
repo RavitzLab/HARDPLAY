@@ -1,0 +1,110 @@
+[
+  {
+    "file": "HardplaySans-Regular.ttf",
+    "family": "Hardplay Sans",
+    "style": "Regular",
+    "source": "HP-PlexSans.ttf",
+    "weight": 400,
+    "x_scale": 0.975,
+    "tracking": 14,
+    "cyrillic_added": 0,
+    "sha256": "39fe6fe7632e5e8e58cdf412f1e5c8caf577087d29c204d6205d0875d6c69934",
+    "bytes": 254000
+  },
+  {
+    "file": "HardplaySans-Medium.ttf",
+    "family": "Hardplay Sans",
+    "style": "Medium",
+    "source": "HP-PlexSans.ttf",
+    "weight": 500,
+    "x_scale": 0.975,
+    "tracking": 14,
+    "cyrillic_added": 0,
+    "sha256": "8b702206a7072afbfdb3ef52bd904fbbb9b4b89eb4360aa952eca0021e2d63d1",
+    "bytes": 254104
+  },
+  {
+    "file": "HardplaySans-Semibold.ttf",
+    "family": "Hardplay Sans",
+    "style": "Semibold",
+    "source": "HP-PlexSans.ttf",
+    "weight": 600,
+    "x_scale": 0.975,
+    "tracking": 14,
+    "cyrillic_added": 0,
+    "sha256": "af5c47e79cf169ce113bb3351d5eb3d5ebcfc90c4b45e0939395b05d67e6e1cd",
+    "bytes": 254044
+  },
+  {
+    "file": "HardplayGrid-Regular.ttf",
+    "family": "Hardplay Grid",
+    "style": "Regular",
+    "source": "HP-SpaceGrotesk.ttf",
+    "weight": 400,
+    "x_scale": 1.04,
+    "tracking": 8,
+    "cyrillic_added": 194,
+    "sha256": "eac31556e838aff697ede96318849257141866c05dd8a36e481d222612c7236e",
+    "bytes": 189320
+  },
+  {
+    "file": "HardplayGrid-Medium.ttf",
+    "family": "Hardplay Grid",
+    "style": "Medium",
+    "source": "HP-SpaceGrotesk.ttf",
+    "weight": 500,
+    "x_scale": 1.04,
+    "tracking": 8,
+    "cyrillic_added": 194,
+    "sha256": "98a8bfdf96ac467f3523694f02417239c4fd365ce17578389c929306c88b21b9",
+    "bytes": 189248
+  },
+  {
+    "file": "HardplayGrid-Semibold.ttf",
+    "family": "Hardplay Grid",
+    "style": "Semibold",
+    "source": "HP-SpaceGrotesk.ttf",
+    "weight": 600,
+    "x_scale": 1.04,
+    "tracking": 8,
+    "cyrillic_added": 194,
+    "sha256": "13fc9a982bfff5b1cf942520b5a1f31ad9959b1dc2e226545865bedbde2b22c0",
+    "bytes": 189220
+  },
+  {
+    "file": "HardplayMono-Regular.ttf",
+    "family": "Hardplay Mono",
+    "style": "Regular",
+    "source": "HP-JetBrainsMono.ttf",
+    "weight": 400,
+    "x_scale": 0.955,
+    "tracking": 0,
+    "cyrillic_added": 0,
+    "sha256": "09939c39d55c7ed47bdb9a3520c46566bfd22e95b512793cdf4c45de1f77f754",
+    "bytes": 159644
+  },
+  {
+    "file": "HardplayMono-Medium.ttf",
+    "family": "Hardplay Mono",
+    "style": "Medium",
+    "source": "HP-JetBrainsMono.ttf",
+    "weight": 500,
+    "x_scale": 0.955,
+    "tracking": 0,
+    "cyrillic_added": 0,
+    "sha256": "8e06e134aa9a138d6d336cf1252ba39507aa710778d9bf9d6bf217120f396e24",
+    "bytes": 159624
+  },
+  {
+    "file": "HardplayMono-Semibold.ttf",
+    "family": "Hardplay Mono",
+    "style": "Semibold",
+    "source": "HP-JetBrainsMono.ttf",
+    "weight": 600,
+    "x_scale": 0.955,
+    "tracking": 0,
+    "cyrillic_added": 0,
+    "sha256": "3736649c2fd6e01a54081008795f83abf04b7165d559b7b5af03384e383a2d24",
+    "bytes": 159616
+  }
+]
