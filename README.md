@@ -6,6 +6,8 @@
 
 [Download for Mac](https://github.com/RavitzLab/HARDPLAY/releases/tag/v0.45.0-beta.5) · [Установка](docs/INSTALL.ru.md) · [Руководство на русском](docs/USER_GUIDE.ru.md) · [Changes](CHANGELOG.md)
 
+[English quick start](docs/QUICKSTART.md)
+
 ## Install and start
 
 1. Download the DMG or ZIP from **Releases**. Published packages require **macOS 14+ and Apple Silicon**. Intel packages are not provided; a source build on Intel has not been validated.

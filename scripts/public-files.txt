@@ -174,3 +174,4 @@ web/mac/logo.png
 web/mac/grid.ttf
 web/mac/OFL.txt
 web/mac/sw.js
+docs/QUICKSTART.md
