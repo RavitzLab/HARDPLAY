@@ -43,7 +43,8 @@ for (const [path,lang,dir,heading] of [['/','en',null,'Your set.'],['/ru/','ru',
   assert.equal((page.match(/class="product-shot/g)||[]).length,9,path+' screenshot count');
   assert.equal((page.match(/aria-current="page"/g)||[]).length,1,path+' current language');
   assert.ok(page.includes('id="protection"'),path+' lock documentation');
-  assert.ok(!page.includes('<script'),path+' no client runtime');
+  assert.equal((page.match(/<script/g)||[]).length,1,path+' only shell retirement script');
+  assert.ok(page.includes('src="/retire-shell.js"'),path+' legacy migration');
   for (const match of page.matchAll(/(?:src|href)="(\/screen-[^"]+\.jpg)"/g)) {
     const image=await request(match[1]); assert.equal(image.status,200,match[1]);
     assert.equal(image.headers.get('content-type'),'image/jpeg');
@@ -52,3 +53,6 @@ for (const [path,lang,dir,heading] of [['/','en',null,'Your set.'],['/ru/','ru',
 }
 for(const path of ['/ru','/he','/en','/en/'])assert.equal((await request(path)).status,200,path);
 console.log('EN/RU/HE static pages, RTL, current-language links, 9 real JPEG screenshots and lock guide passed');
+
+const retirement=await (await request('/retire-shell.js')).text();assert.ok(retirement.includes('unregister()')&&!retirement.includes('indexedDB')&&!retirement.includes('caches.delete'));
+assert.ok(sw.indexOf('registration.unregister()')<sw.indexOf('client.navigate'));

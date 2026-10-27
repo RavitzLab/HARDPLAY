@@ -185,3 +185,4 @@ web/mac/screen-menubar.jpg
 web/mac/screen-mini.jpg
 web/mac/screen-nano.jpg
 web/scripts/landing-locales.mjs
+web/mac/retire-shell.js
