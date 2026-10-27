@@ -41,7 +41,13 @@ extension AudioRouting {
         }
         info.rate=scalar(kAudioDevicePropertyNominalSampleRate,0.0)
         let rr=ranges(kAudioDevicePropertyAvailableNominalSampleRates)
-        info.rates=Array(Set(([22050.0,32000,44100,48000,88200,96000,176400,192000]+rr.flatMap {[$0.mMinimum,$0.mMaximum]}).filter {v in rr.contains {$0.mMinimum<=v && v<=$0.mMaximum}}+[info.rate])).filter {$0>0}.sorted()
+        let standardRates:[Double]=[22050,32000,44100,48000,88200,96000,176400,192000]
+        let rangeEdges:[Double]=rr.flatMap {[$0.mMinimum,$0.mMaximum]}
+        let supportedRates=(standardRates+rangeEdges).filter {rate in
+            rr.contains {range in range.mMinimum<=rate && rate<=range.mMaximum}
+        }
+        let uniqueRates=Set(supportedRates+[info.rate])
+        info.rates=uniqueRates.filter {$0>0}.sorted()
         info.frames=scalar(kAudioDevicePropertyBufferFrameSize,UInt32(0))
         let br=ranges(kAudioDevicePropertyBufferFrameSizeRange)
         let standardBuffers:[UInt32]=[32,64,128,256,512,1024,2048,4096]
