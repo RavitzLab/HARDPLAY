@@ -175,3 +175,13 @@ web/mac/grid.ttf
 web/mac/OFL.txt
 web/mac/sw.js
 docs/QUICKSTART.md
+web/mac/screen-audio.jpg
+web/mac/screen-backup.jpg
+web/mac/screen-crossfade.jpg
+web/mac/screen-editor.jpg
+web/mac/screen-locked.jpg
+web/mac/screen-main.jpg
+web/mac/screen-menubar.jpg
+web/mac/screen-mini.jpg
+web/mac/screen-nano.jpg
+web/scripts/landing-locales.mjs
