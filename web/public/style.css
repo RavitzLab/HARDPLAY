@@ -81,3 +81,22 @@ button.tape{background-color:var(--tape)!important;color:var(--tape-ink)!importa
 .play #play-icon{inset:auto;margin:0;transform:none}
 .play #play-icon{position:absolute;left:50%;top:50%;right:auto;bottom:auto;width:56%;height:56%;transform:translate(-50%,-50%);display:block;margin:0}
 .play #play-icon svg,.compact .play #play-icon svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:2.4}
+
+/* Modular Grid is the factory theme, including auxiliary documents and drawers. */
+@font-face{font-family:HardplayGrid;src:url('./hardplay-grid.ttf') format('truetype');font-weight:400;font-display:swap}
+:root{--bg:#0d1012;--text:#e9ebe8;--blue:#b7c848;--muted:#9ba4a5;--tape:#15191c;--surface:#0d1012;--radius:2px;--marker:HardplayGrid,system-ui,sans-serif}
+html[data-theme='modular grid']{--marker:HardplayGrid,system-ui,sans-serif;--tape-ink:#e9ebe8;--border:#343c40}
+html[data-theme='modular grid'] body{background-color:var(--bg);background-image:none}
+html[data-theme='modular grid'] .ambient{background:var(--bg)}
+html[data-theme='modular grid'][data-texture=true] .player,html[data-theme='modular grid'][data-texture=true] .playlist-drawer{background-image:linear-gradient(#343c4026 1px,transparent 1px),linear-gradient(90deg,#343c4026 1px,transparent 1px);background-size:64px 64px}
+html[data-theme='modular grid'] .player,html[data-theme='modular grid'] .playlist-drawer{border:1px solid #343c40;border-radius:2px;backdrop-filter:none}
+html[data-theme='modular grid'] .deck,html[data-theme='modular grid'] .deck.next,html[data-theme='modular grid'] dialog,html[data-theme='modular grid'] [popover],html[data-theme='modular grid'] #pocket-lock-drawer{background:#15191c;border-color:#343c40;border-radius:2px}
+html[data-theme='modular grid'] .brand-words,html[data-theme='modular grid'] .tape{clip-path:none;background-image:none;border:1px solid #343c40;border-radius:2px}
+html[data-theme='modular grid'] button:not(.play){background-color:#202629;box-shadow:none;border-radius:2px}
+html[data-theme='modular grid'] .brand-words,html[data-theme='modular grid'] .track-title-input,html[data-theme='modular grid'] .set-name-input{font-family:var(--marker)!important}
+html[data-theme='modular grid'] .pocket-player{background:var(--bg);color:var(--text);border-color:#343c40;border-radius:8px}
+html[data-theme='modular grid'] .pocket-screen{background:#15191c;color:var(--text);border:1px solid #343c40;border-radius:2px}
+html[data-theme='modular grid'] .pocket-wheel{background:#202629;border-color:#343c40}
+html[data-theme='modular grid'] .pocket-wheel button{color:var(--text);background:none;border-radius:50%}
+html[data-theme='modular grid'] .pocket-wheel .pocket-play{background:color-mix(in srgb,var(--blue) 18%,#202629)}
+html[data-theme='modular grid'] input,html[data-theme='modular grid'] select,html[data-theme='modular grid'] textarea{color:var(--text);accent-color:var(--blue);background-color:#202629;border-color:#343c40}

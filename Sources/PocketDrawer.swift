@@ -69,7 +69,6 @@ struct NanoControlsPanel:View {
     var body:some View {
         VStack(alignment:.leading,spacing:8) {
             HStack {Text("CONTROLS").font(.system(size:9,weight:.bold,design:.monospaced));Spacer();Button {AppDelegate.shared.hideNanoControls()} label:{Image(systemName:"chevron.left")}.buttonStyle(.plain).accessibilityLabel("Hide Player Controls")}
-            Button {AppDelegate.shared.showDJ()} label:{Label("DJ · Two Decks",systemImage:"opticaldisc").font(.stage(size:12)).frame(maxWidth:.infinity,alignment:.leading).padding(7)}.buttonStyle(PlayerControlStyle()).disabled(lock.isLocked || setup.settingsBlocked)
             ForEach(actions.buttons) {button in
                 HStack(spacing:4) {
                     Button {mappings.trigger(button.action,behavior:button.behavior)} label:{Text(button.action.title).font(.stage(size:11)).lineLimit(2).frame(maxWidth:.infinity,alignment:.leading).padding(7)}.buttonStyle(PlayerControlStyle(active:mappings.isOn(button.action) ?? false)).disabled(lock.isLocked)

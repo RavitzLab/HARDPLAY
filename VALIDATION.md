@@ -1,4 +1,4 @@
-# Validation — HARDPLAY Beta 5 (0.44.0)
+# Validation — HARDPLAY Beta 5 (0.44.1)
 
 - macOS arm64 release build, model self-test, queue and style checks passed.
 - Clip tests cover exact sample trim/join, original-file preservation, export cancellation, Undo/Redo, stereo edge-silence detection, internal silence retention, silent/no-edge cases, and custom fade persistence.
@@ -193,3 +193,11 @@
 
 - Beta 5 extended native checks passed: playlist, media import, backup manifest, TLS pairing, metadata push/pull, timing diagnostics and linked Play/Pause/seek/skip on local loopback. These do not establish physical-output synchronization accuracy.
 - Release DMG and ZIP SHA256 checks passed; bundle release title HARDPLAY Beta 5 and tag v0.44.0-beta.5 were read back from Info.plist.
+
+
+## Modular Grid default - 0.44.1
+
+- Native release/model/queue/style/fixed-layout/DJ checks passed, including the updated default and migration expectations. Web Viewer live HTTP/security tests passed.
+- Installed 0.44.1 (106): strict signature passed and binary matched build. Main, Mini, Nano and Nano left panel were visually inspected in Modular Grid. Main remained paused at the existing cue.
+- Web: 29 tests passed, including one-time migration, old preference backup, later user choice persistence and storage-unavailable fallback. Build/ESM/offline checks passed. Main and settings visually inspected; synthetic Web Viewer inspected with the Grid font and matching palette.
+- Existing web Site version 11 deployed successfully with the same owner-only audience. No public GitHub update of 0.44.1 is claimed here.

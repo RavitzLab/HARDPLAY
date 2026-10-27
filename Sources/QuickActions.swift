@@ -14,7 +14,7 @@ final class QuickActions:ObservableObject {
     init(defaults:UserDefaults = .standard,key:String="quickActionButtons") {
         self.key=key
         self.defaults=defaults
-        if let data=defaults.data(forKey:key),let saved=try? JSONDecoder().decode([QuickActionButton].self,from:data),saved.count<=4,Set(saved.map(\.id)).count==saved.count,saved.allSatisfy(\.valid) {buttons=saved}
+        if let data=defaults.data(forKey:key),let saved=try? JSONDecoder().decode([QuickActionButton].self,from:data),saved.count<=4,Set(saved.map(\.id)).count==saved.count,saved.allSatisfy(\.valid) {buttons=saved.filter {$0.action.rawValue != "dj"}}
     }
     private var canEdit:Bool {!ControlLock.shared.isLocked && !SetupLock.shared.settingsBlocked}
     private func save() {defaults.set(try? JSONEncoder().encode(buttons),forKey:key)}

@@ -164,3 +164,13 @@ docs/DJ-MODE.ru.md
 Sources/PlaylistPreview.swift
 Sources/PlaylistPreviewTests.swift
 docs/RELEASE-0.44.0.md
+web/public/hardplay-grid.ttf
+web/public/hardplay-grid-OFL.txt
+docs/RELEASE-0.44.1.md
+docs/RELEASE-0.45.0.md
+web/mac/index.html
+web/mac/site.css
+web/mac/logo.png
+web/mac/grid.ttf
+web/mac/OFL.txt
+web/mac/sw.js

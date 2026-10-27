@@ -65,10 +65,6 @@ struct PatchSettingsView:View {
     }
     private var appSettings:some View {
         VStack(alignment:.leading,spacing:16) {
-            section("DJ MODE") {
-                Button("Open DJ · Two Decks") {AppDelegate.shared.showDJ()}
-                Text("Independent decks, Cue, tempo, loops and Hot Cues. The playlist player pauses when DJ opens.").font(.stage(.caption)).stageSecondary()
-            }
             section("APP") {
                 Button("Workspace: "+workspace.title) {workspace.toggle()}.stageHint("Choose a single workspace or separate utility windows")
                 WindowDestinationSettings();QuickActionSettings()

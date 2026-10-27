@@ -18,11 +18,11 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.hardplay.player</string>
 <key>CFBundleName</key><string>Hard Play</string>
 <key>CFBundleDisplayName</key><string>Hard Play</string>
-<key>CFBundleVersion</key><string>105</string>
-<key>CFBundleShortVersionString</key><string>0.44.0</string>
-<key>CFBundleGetInfoString</key><string>HARDPLAY Beta 5 (0.44.0)</string>
+<key>CFBundleVersion</key><string>107</string>
+<key>CFBundleShortVersionString</key><string>0.45.0</string>
+<key>CFBundleGetInfoString</key><string>HARDPLAY Beta 5 (0.45.0)</string>
 <key>HardPlayReleaseTitle</key><string>HARDPLAY Beta 5</string>
-<key>HardPlayReleaseTag</key><string>v0.44.0-beta.5</string>
+<key>HardPlayReleaseTag</key><string>v0.45.0-beta.5</string>
 <key>HardPlayPrerelease</key><true/>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
 <key>CFBundleLocalizations</key><array><string>en</string></array>

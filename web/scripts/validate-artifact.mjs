@@ -24,9 +24,12 @@ assert.equal(
 
 console.log("Artifact is valid ESM and exports default.fetch");
 
-for (const path of ['/', '/app/', '/app/app.mjs', '/app/appearance.mjs', '/app/sw.js']) {
-  const response = await workerModule.default.fetch(new Request('https://hardplay.test'+path));
-  assert.equal(response.status,200,path);
-}
-assert.equal((await workerModule.default.fetch(new Request('https://hardplay.test/app/api/cloud'))).status,400);
-console.log('Root and /app/ entrypoints, offline assets and cloud routing passed');
+const request=path=>workerModule.default.fetch(new Request('https://hardplay.test'+path));
+for(const path of ['/', '/site.css', '/logo.png', '/grid.ttf', '/OFL.txt', '/sw.js','/app/sw.js']) assert.equal((await request(path)).status,200,path);
+for(const path of ['/app','/app/','/app/index.html']) assert.equal((await request(path)).status,302,path);
+for(const path of ['/app.mjs','/appearance.mjs','/manifest.webmanifest','/api/cloud','/app/app.mjs','/app/api/cloud']) assert.equal((await request(path)).status,410,path);
+const html=await (await request('/')).text();
+assert.ok(html.includes('v0.45.0-beta.5/HARDPLAY-0.45.0-macOS-arm64.dmg'));
+assert.ok(!html.includes('<audio')&&!html.includes('app.mjs'));
+const sw=await (await request('/sw.js')).text();assert.ok(sw.includes('unregister()')&&sw.includes('hardplay-shell-')&&!sw.includes('indexedDB'));
+console.log('Mac download page and assets passed; legacy app/cloud routes retired; shell-only service worker retirement passed');

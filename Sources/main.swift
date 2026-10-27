@@ -1241,7 +1241,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle: "Save Playlist",action:#selector(savePlaylist),keyEquivalent:"s")
         let saveAs = appMenu.addItem(withTitle:"Save Playlist As…",action:#selector(savePlaylistAs),keyEquivalent:"s"); saveAs.keyEquivalentModifierMask = [.command,.shift]
         let open = appMenu.addItem(withTitle:"Open Playlist…",action:#selector(openPlaylist),keyEquivalent:"o"); open.keyEquivalentModifierMask = [.command,.shift]
-        appMenu.addItem(withTitle:"DJ · Two Decks…",action:#selector(showDJ),keyEquivalent:"d")
         appMenu.addItem(withTitle:"PATCH…",action:#selector(showSettingsWindow),keyEquivalent:",")
         appMenu.addItem(withTitle:"Timecode & Backup…",action:#selector(showBackupWindow),keyEquivalent:"")
         appMenu.addItem(withTitle:"Web Viewer…",action:#selector(showWebViewer),keyEquivalent:"")
@@ -1699,17 +1698,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NanoControlsState.shared.open=false;nanoControlsWindow?.orderOut(nil);if let panel=nanoControlsWindow {panel.parent?.removeChildWindow(panel)};nanoControlsOwner=nil
     }
     func stopDJForPlayer() {if djWindow?.isVisible == true {hideNanoControls();DJSession.shared.stop();djWindow?.orderOut(nil)}}
-    @objc func showDJ() {
-        guard !ControlLock.shared.isLocked,!SetupLock.shared.settingsBlocked else {return}
-        guard !Player.shared.isLoading else {return}
-        Player.shared.pause() // Prevent the show player from doubling the DJ signal.
-        hideNanoControls()
-        if djWindow==nil {
-            let window=utilityWindow(title:"Hard Play DJ",width:1160,height:810)
-            window.contentView=ProfileHostingView(rootView:DJWindowView().windowSizeCanvas(.dj));djWindow=window;window.center()
-        }
-        WindowSizes.shared.apply(djWindow!);djWindow?.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
-    }
+    // DJ Gear is unavailable in the distributed Mac-only player. Old mappings are inert.
+    @objc func showDJ() {}
     func closeDJ() {hideNanoControls();DJSession.shared.stop();djWindow?.orderOut(nil);showMain()}
     func togglePocketDrawer() {
         if PocketDrawerState.shared.open {hidePocketDrawer()}else {nanoPlaylist.hide();showPocketDrawer()}
@@ -1869,6 +1859,15 @@ if CommandLine.arguments.contains("--render-wordmark") || CommandLine.arguments.
 } else if CommandLine.arguments.contains("--style-check") {
     checkThemeControlContrast()
     checkPreviewInteraction()
+    precondition(!MappedAction.all.contains {$0.rawValue=="dj"})
+    let retiredSuite="local.hardplay.retired-dj-check.\(UUID().uuidString)"
+    let retiredDefaults=UserDefaults(suiteName:retiredSuite)!
+    let legacyDJ=QuickActionButton(action:MappedAction(rawValue:"dj"),behavior:.trigger)
+    let retainedMute=QuickActionButton(action:MappedAction(rawValue:"mute"),behavior:.toggle)
+    retiredDefaults.set(try JSONEncoder().encode([legacyDJ,retainedMute]),forKey:"quickActionButtons")
+    precondition(QuickActions(defaults:retiredDefaults).buttons == [retainedMute])
+    retiredDefaults.removePersistentDomain(forName:retiredSuite)
+    print("PASS: DJ absent from assignable actions; old DJ quick buttons removed while other controls survive")
     checkDJButtonRendering()
     checkWindowSizes()
     HardPlayBrand.checkPlayTint()
@@ -1877,6 +1876,7 @@ if CommandLine.arguments.contains("--render-wordmark") || CommandLine.arguments.
     let themeSuite = "local.hardplay.theme-check.\(UUID().uuidString)"
     let themeDefaults = UserDefaults(suiteName:themeSuite)!
     let themePrefs = AppearancePreferences(defaults:themeDefaults)
+    precondition(themePrefs.theme.preset == "Modular Grid")
     themePrefs.theme = .named("Mono Console")
     themePrefs.theme.accent = "AB1234"
     themePrefs.theme.mainWindowOpacity = 0.55
@@ -1920,7 +1920,7 @@ if CommandLine.arguments.contains("--render-wordmark") || CommandLine.arguments.
     themeDefaults.set(true,forKey:"blueWhiteModes.v1");themeDefaults.set(true,forKey:"markerStyle.v1")
     for name in ["Tape Blue","Tape Black","Stage","Cables","Minimal"] {
         themeDefaults.set(try JSONEncoder().encode(StageTheme.named(name)),forKey:"stageAppearance.v1")
-        precondition(AppearancePreferences(defaults:themeDefaults).theme.preset == "Studio Precision")
+        precondition(AppearancePreferences(defaults:themeDefaults).theme.preset == "Modular Grid")
     }
     var oldDigital=StageTheme.named("Digital Underground");oldDigital.accent="C4FF00";oldDigital.waveform="C4FF00";oldDigital.tape="987654"
     themeDefaults.set(try JSONEncoder().encode(oldDigital),forKey:"stageAppearance.v1")

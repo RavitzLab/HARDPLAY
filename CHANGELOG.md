@@ -1,5 +1,18 @@
 # Changelog
 
+## Beta 5 - 0.45.0
+
+- Mac-only distribution: DJ Gear entry points removed, old DJ mappings inert, saved DJ quick buttons filtered without discarding other controls.
+- Website replaced with a Mac download and quick-start page. Former player, cloud API and PWA routes retired; old shell caches retire on reconnection while user audio stays intact.
+- Modular Grid is the shared default across Mac surfaces and Web Viewer.
+
+
+## Beta 5 - 0.44.1
+
+- Modular Grid becomes the default across native player windows, settings, drawers, Web Viewer and offline web player. Existing appearances are backed up before a one-time migration.
+- Web surfaces use the same local Grid font and palette, including auxiliary windows and offline font caching.
+
+
 ## Beta 5 - 0.44.0
 
 - Consolidated working beta of Main, Mini, Nano and menu-bar playback, including all changes through 0.43.6.

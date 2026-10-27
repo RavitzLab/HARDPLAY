@@ -116,12 +116,12 @@ final class AppearancePreferences: ObservableObject {
         let prior=defaults.data(forKey:"stageAppearance.v1")
         if !defaults.bool(forKey:"markerStyle.v1") {
             if let prior {defaults.set(prior,forKey:"stageAppearance.beforeMarker.v1")}
-            theme = .named("Studio Precision");defaults.set(true,forKey:"markerStyle.v1")
+            theme = .named("Modular Grid");defaults.set(true,forKey:"markerStyle.v1")
             if let data=try? JSONEncoder().encode(theme) {defaults.set(data,forKey:"stageAppearance.v1")}
-        } else {theme=prior.flatMap {try? JSONDecoder().decode(StageTheme.self,from:$0)} ?? .named("Studio Precision")}
+        } else {theme=prior.flatMap {try? JSONDecoder().decode(StageTheme.self,from:$0)} ?? .named("Modular Grid")}
         customThemes = defaults.data(forKey:"stageCustomThemes.v1").flatMap {try? JSONDecoder().decode([SavedStageTheme].self,from:$0)} ?? []
         if theme.preset == "Blue & White" {theme.preset = "White"}
-        if ["FOH","Tape Blue","Tape Black","Stage","Cables","Minimal"].contains(theme.preset),theme.customThemeID == nil {theme = .named("Studio Precision")}
+        if ["FOH","Tape Blue","Tape Black","Stage","Cables","Minimal"].contains(theme.preset),theme.customThemeID == nil {theme = .named("Modular Grid")}
         // Update only unchanged factory colors, preserving user overrides and named custom themes.
         if theme.preset == "Digital Underground",theme.customThemeID == nil {
             let updated=StageTheme.named("Digital Underground")
@@ -141,6 +141,11 @@ final class AppearancePreferences: ObservableObject {
             var snapshot = previous; snapshot.customThemeID = id
             customThemes.append(SavedStageTheme(id:id,name:"Imported \(previous.preset)",theme:snapshot))
             theme = snapshot
+        }
+        if !defaults.bool(forKey:"modularGridDefault.v1") {
+            defaults.set(try? JSONEncoder().encode(theme),forKey:"stageAppearance.beforeModularGrid.v1")
+            theme = .named("Modular Grid")
+            defaults.set(true,forKey:"modularGridDefault.v1")
         }
         defaults.set(true,forKey:"curatedThemes.v1")
         if let data = try? JSONEncoder().encode(customThemes) {defaults.set(data,forKey:"stageCustomThemes.v1")}
@@ -307,7 +312,7 @@ struct ThemeEditorView: View {
                         .disabled(draft.name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
                 }
                 Text("Save a new name to create a theme. Use an existing name to update it.").font(.stage(.caption)).stageSecondary()
-                Button("Reset to Studio Precision") { appearance.theme = .named("Studio Precision") }.buttonStyle(.bordered)
+                Button("Reset to Modular Grid") { appearance.theme = .named("Modular Grid") }.buttonStyle(.bordered)
                 Text("Current appearance is saved automatically on this Mac. Named themes stay in My Themes.").font(.stage(.caption)).stageSecondary()
             }.padding(22).disabled(setup.settingsBlocked || lock.isLocked)
         }.frame(minWidth:360,minHeight:embedded ? 300:500).foregroundStyle(Color(stageHex:appearance.theme.text))

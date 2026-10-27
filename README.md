@@ -4,7 +4,7 @@
 
 **A lightweight audio player for macOS, built for running a set while working in other apps.** Developed by RavitzLab. Play local files, prepare transitions and control the same queue from Main, Mini, Nano or the menu bar.
 
-[Download for Mac](https://github.com/RavitzLab/HARDPLAY/releases/latest) · [Установка](docs/INSTALL.ru.md) · [Руководство на русском](docs/USER_GUIDE.ru.md) · [Changes](CHANGELOG.md)
+[Download for Mac](https://github.com/RavitzLab/HARDPLAY/releases/tag/v0.45.0-beta.5) · [Установка](docs/INSTALL.ru.md) · [Руководство на русском](docs/USER_GUIDE.ru.md) · [Changes](CHANGELOG.md)
 
 ## Install and start
 
@@ -16,7 +16,7 @@
 
 The app is ad-hoc signed and **not notarized by Apple**. If macOS blocks its first launch, verify the source and use the normal **System Settings → Privacy & Security → Open Anyway** flow. Do not disable Gatekeeper. Local playback does not need an internet connection. Supported codecs depend on macOS; the app does not promise every audio format.
 
-**Versions:** current source is **Beta 5 (0.44.0)**. Installers are published separately under Releases; check the version before downloading. Source changes do not deploy the web edition.
+**Versions:** current source is **Beta 5 (0.45.0)**. Installers are published separately under Releases; check the version before downloading. The hosted site provides Mac downloads; browser playback is retired.
 
 ## What you can do
 
@@ -40,7 +40,7 @@ The app is ad-hoc signed and **not notarized by Apple**. If macOS blocks its fir
 - **Quick Edit:** [editing guide](docs/QUICK-EDIT.ru.md). It edits regions from one source file; it is not a multitrack DAW.
 - **Web Viewer:** [local read-only playlist display](docs/WEB-VIEWER.ru.md). It does not stream audio or offer remote transport control.
 - **Backup set sync:** [connect two Macs and choose the source](docs/BACKUP-SETUP.ru.md). Push or pull playlist metadata, matching locally loaded files by SHA-256. Review before applying; Undo restores the destination. The A/B indicator next to PATCH shows connection and set matching. Enable **Linked Playback** on both paused Macs to share Play/Pause, Next/Previous and seeks, with Primary A driving track choice and position updates. Sync Timing measures network RTT/jitter and estimated player offset. Optional Auto Align on B gently corrects small drift; physical audio calibration remains external. This is LAN control, not sample-accurate clock synchronization; automatic failover and hardware timecode are not implemented. [Future stage plan](docs/TIMECODE-BACKUP-PLAN.ru.md).
-- **Offline web player:** a separate edition in [`web/`](web/README.md). Its features and browser storage differ from the Mac app. It does not automatically share the native audio library.
+- **Mac only:** the hosted site is a download page. Browser playback, cloud proxy endpoints and PWA installation are retired. Web Viewer remains a read-only display served by the Mac app.
 
 Hardware MIDI, physical audio routing, cross-computer operation and live PA use need testing with the intended equipment. See [validation status](VALIDATION.md).
 
@@ -86,6 +86,9 @@ Build output, caches, personal sets, audio, credentials, hosting identities and 
 
 Release maintainers: a main-branch commit containing `[release]` (or a manual **Publish Mac Release** run) builds and tests the current version, then publishes its DMG, ZIP and checksums using `docs/RELEASE-<version>.md`. Existing releases are never overwritten.
 
-DJ mode and Nano custom controls: [quick guide](docs/DJ-MODE.ru.md). DJ is experimental; physical latency and live hardware are not certified.
+DJ Gear is unavailable in this distributed version, including its menu entries, custom controls and old mappings. Retained experimental sources are not an enabled product feature.
 
 Playlist audition: sending a track to the separate Preview output replaces its title with a seekable waveform. Click the preview button to pause/resume; hold for 0.5 seconds to stop and restore the title. Pausing retains the audition position. The row labels the actual Preview output; Main playback is independent.
+
+
+Modular Grid is the factory theme across Mac windows, Web Viewer and web player. Previous appearance preferences are backed up on the one-time switch; later choices remain editable and persistent.

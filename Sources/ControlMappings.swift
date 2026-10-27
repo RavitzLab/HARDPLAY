@@ -9,7 +9,7 @@ struct MappedAction: RawRepresentable, Codable, Hashable, Identifiable {
     var rawValue: String
     var id: String { rawValue }
     static let names: [(String,String)] = [("playPause","Play / Pause"),("mute","Mute"),("shuffle","Shuffle"),("repeat","Repeat Queue"),("stopAtEnd","Stop at End"),("previous","Previous Track"),("next","Next Track"),("restart","Restart"),("resume","Resume"),("fadeOff","Fade Off"),("fadeShort","Short Fade"),("fadeLong","Long Fade"),("applyAll","Apply Fade to All"),("volume","Master Volume"),("volumeDown","Volume Down"),("volumeUp","Volume Up"),("mini","Mini Player"),("playlist","Playlist Window"),("lockSetup","Lock Setup"),("lock","Lock All Controls"),("dj","DJ · Two Decks"),("settings","Open PATCH"),("themes","Open Themes"),("mappings","Open MIDI / Keys"),("backup","Open Backup"),("viewer","Open Web Viewer"),("editSelected","Edit Selected Track"),("nano","Nano Player"),("autoFit","Cycle Window Size"),("autoNano","Nano on Minimize"),("fullScreen","Full Screen"),("hints","Control Hints")]
-    static var all: [MappedAction] { names.map { .init(rawValue:$0.0) } }
+    static var all: [MappedAction] { names.filter {$0.0 != "dj"}.map { .init(rawValue:$0.0) } }
     var title: String {
         if rawValue.hasPrefix("track:") { return "Play · " + (Player.shared.tracks.first { $0.id == String(rawValue.dropFirst(6)) }?.title ?? URL(fileURLWithPath:String(rawValue.dropFirst(6))).deletingPathExtension().lastPathComponent) }
         return Self.names.first { $0.0 == rawValue }?.1 ?? rawValue
@@ -105,7 +105,7 @@ final class ControlMappings: ObservableObject {
         let restoredVolume = defaults.double(forKey:"unmutedVolume")
         if restoredVolume > 0 && restoredVolume <= 1 { unmutedVolume = restoredVolume }
         if let data = defaults.data(forKey:"controlMapSet"), let value = try? JSONDecoder().decode(ControlMapSet.self,from:data), Self.valid(value) {
-            bindings = value.bindings; setName = value.name
+            bindings = value.bindings.filter {$0.action.rawValue != "dj"}; setName = value.name
         }
         if liveIO { startKeyboard(); startMIDI() }
         settingsObserver = setupLock.objectWillChange.sink { [weak self] in
@@ -210,7 +210,7 @@ final class ControlMappings: ObservableObject {
         case "lock": AppDelegate.shared.lockControls()
         case "editSelected":
             if let track=p.selectedTrack ?? p.current {AppDelegate.shared?.showQuickEdit(track)}
-        case "dj":AppDelegate.shared?.showDJ()
+        case "dj":return // Retired action: never open a DJ window.
         case "settings","themes","mappings","backup","viewer":
             if let section=action.workspaceSection {WorkspaceState.shared.open(section)}
         case "nano":if toggles || !WindowPresentation.shared.nano {AppDelegate.shared?.toggleNano()}
@@ -351,7 +351,7 @@ final class ControlMappings: ObservableObject {
                 let data = try Data(contentsOf:url); guard data.count < 1_000_000 else { throw CocoaError(.fileReadCorruptFile) }
                 let value = try JSONDecoder().decode(ControlMapSet.self,from:data)
                 guard Self.valid(value) else { throw CocoaError(.fileReadCorruptFile) }
-                bindings = value.bindings; setName = value.name; selected = nil; persist(); registerKeys(); message = "Control set loaded"
+                bindings = value.bindings.filter {$0.action.rawValue != "dj"}; setName = value.name; selected = nil; persist(); registerKeys(); message = "Control set loaded"
             } catch { message = "Unable to load set: " + error.localizedDescription }
         }
     }
